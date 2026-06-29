@@ -1,11 +1,12 @@
 """Provenance Guard — Flask API.
 
-Milestone 3 scope: the submission endpoint wired to Signal 1 (Groq LLM), a
-structured SQLite audit log, and a /log endpoint to surface it.
+Milestone 4 scope: the submission endpoint runs BOTH detection signals — Signal 1
+(Groq LLM, semantic) and Signal 2 (stylometrics, structural) — combines them in
+the isolated confidence scorer, and records both individual scores plus the
+combined confidence to the structured SQLite audit log. /log surfaces it.
 
-Deliberately NOT here yet (M4/M5): Signal 2 / stylometrics, the real confidence
-scorer, real transparency labels, /appeal, and rate limiting. The ``confidence``
-and ``label`` fields below are clearly marked placeholders.
+Deliberately NOT here yet (M5): real transparency labels, /appeal, and rate
+limiting. The ``label`` field below is a clearly marked placeholder.
 """
 
 import uuid
@@ -13,30 +14,16 @@ import uuid
 from flask import Flask, jsonify, request
 
 from audit import get_log, init_db, write_entry
+from scoring import score_confidence
 from signals.llm_signal import classify_with_llm
+from signals.stylometric_signal import analyze_stylometrics
 
 app = Flask(__name__)
 init_db()
 
-# M3 placeholder. The real label text (three variants) is generated from the
+# M4 placeholder. The real label text (three variants) is generated from the
 # combined confidence score in Milestone 5.
 PLACEHOLDER_LABEL = "Transparency label generated in Milestone 5."
-
-
-def _placeholder_attribution(llm_score):
-    """Temporary stand-in for the M4 combined scorer.
-
-    Applies the planning.md §3 three bands to the Signal-1 score ALONE so the
-    response carries a meaningful attribution field now. M4 replaces this with
-    the real combined-signal scorer; do not treat this as final scoring.
-    """
-    if llm_score is None:
-        return "uncertain"
-    if llm_score >= 0.70:
-        return "likely_ai"
-    if llm_score < 0.40:
-        return "likely_human"
-    return "uncertain"
 
 
 @app.route("/submit", methods=["POST"])
@@ -60,9 +47,15 @@ def submit():
     llm_status = signal1["status"]
     injection_suspected = 1 if signal1.get("marker") else 0
 
-    # Placeholder attribution/confidence/label (see notes above; real in M4/M5).
-    attribution = _placeholder_attribution(llm_score)
-    confidence = llm_score  # placeholder: Signal-1 score stands in for now
+    # Signal 2 — structural stylometrics (genre-aware via optional content_type).
+    signal2 = analyze_stylometrics(text, content_type)
+    stylo_score = signal2["score"]
+    stylo_status = signal2["status"]
+
+    # Combine both signals in the isolated scorer (blend + fallback + bands).
+    verdict = score_confidence(signal1, signal2)
+    attribution = verdict["attribution"]
+    confidence = verdict["confidence"]
 
     # Audit write happens BEFORE responding so every decision is recorded.
     write_entry(
@@ -72,7 +65,7 @@ def submit():
             "attribution": attribution,
             "confidence": confidence,
             "llm_score": llm_score,
-            "stylo_score": None,  # Signal 2 arrives in M4
+            "stylo_score": stylo_score,
             "llm_status": llm_status,
             "injection_suspected": injection_suspected,
             "status": "classified",
@@ -83,8 +76,13 @@ def submit():
         {
             "content_id": content_id,
             "attribution": attribution,
-            "confidence": confidence,  # placeholder until M4
-            "signal_scores": {"llm_score": llm_score, "llm_status": llm_status},
+            "confidence": confidence,
+            "signal_scores": {
+                "llm_score": llm_score,
+                "llm_status": llm_status,
+                "stylo_score": stylo_score,
+                "stylo_status": stylo_status,
+            },
             "label": PLACEHOLDER_LABEL,  # placeholder until M5
         }
     )
