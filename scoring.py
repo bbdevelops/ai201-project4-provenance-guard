@@ -28,6 +28,16 @@ FALLBACK_CAP = 0.69  # single-signal verdicts can never enter the likely_ai band
 # --- Blend weights (slight lean toward the semantic signal) -------------------
 W_LLM, W_STYLO = 0.6, 0.4
 
+# --- Ensemble Detection stretch (Signal 3 present) ----------------------------
+# Three-signal weights, semantic still highest (planning.md §Stretch). Used only
+# when a perplexity signal is passed in; renormalized over whatever subset is
+# usable. The required two-signal path above is untouched.
+W3_LLM, W3_STYLO, W3_PPL = 0.5, 0.3, 0.2
+# Conflict resolution: if the usable signals' scores span more than this, they
+# "strongly disagree" — cap the blend at FALLBACK_CAP so disagreement widens into
+# the uncertain band rather than forcing a confident AI verdict (§3 asymmetry).
+DISAGREE_SPREAD = 0.40
+
 
 def attribution_for(confidence):
     """Map a combined confidence (or None) to one of three attribution bands."""
@@ -45,16 +55,25 @@ def _usable(signal):
     return signal.get("status") == "success" and signal.get("score") is not None
 
 
-def score_confidence(llm_signal, stylo_signal):
-    """Combine the two signal objects into a verdict.
+def score_confidence(llm_signal, stylo_signal, perplexity_signal=None):
+    """Combine the signal objects into a verdict.
 
-    Returns ``{"confidence": float|None, "attribution": str, "mode": str}``
-    where mode is one of:
+    Returns ``{"confidence": float|None, "attribution": str, "mode": str}``.
+
+    When ``perplexity_signal`` is None (the required two-signal system, Signal 3
+    disabled) the original two-signal logic runs unchanged; mode is one of:
       "blended"        — both signals trusted, weighted blend
       "fallback_stylo" — LLM degraded, stylometrics alone, capped at 0.69
       "fallback_llm"   — stylometrics degraded, LLM alone, capped at 0.69
       "degraded"       — neither signal usable, no confidence
+
+    When ``perplexity_signal`` is provided (Ensemble Detection stretch) the
+    three-signal path runs instead — see ``_score_ensemble`` — with modes
+    "ensemble", "ensemble_conflict", "ensemble_fallback", and "degraded".
     """
+    if perplexity_signal is not None:
+        return _score_ensemble(llm_signal, stylo_signal, perplexity_signal)
+
     llm_ok = _usable(llm_signal)
     stylo_ok = _usable(stylo_signal)
 
@@ -84,3 +103,53 @@ def score_confidence(llm_signal, stylo_signal):
         }
 
     return {"confidence": None, "attribution": "uncertain", "mode": "degraded"}
+
+
+def _score_ensemble(llm_signal, stylo_signal, perplexity_signal):
+    """Three-signal blend with disagreement-widening (planning.md §Stretch).
+
+    Weighted blend with the semantic signal weighted highest
+    (``0.5/0.3/0.2``), renormalized over whatever subset is usable:
+      - 0 usable -> no confidence (degraded).
+      - 1 usable -> that signal alone, capped at FALLBACK_CAP (one signal can
+        never reach the likely_ai band — §3 false-positive asymmetry).
+      - 2-3 usable -> renormalized weighted blend, then conflict resolution: if
+        the usable scores span more than DISAGREE_SPREAD, cap at FALLBACK_CAP so
+        strong disagreement widens into the uncertain band.
+    """
+    # (weight, signal) in priority order; keep only the usable ones.
+    candidates = [
+        (W3_LLM, llm_signal),
+        (W3_STYLO, stylo_signal),
+        (W3_PPL, perplexity_signal),
+    ]
+    usable = [(w, s["score"]) for (w, s) in candidates if _usable(s)]
+
+    if not usable:
+        return {"confidence": None, "attribution": "uncertain", "mode": "degraded"}
+
+    if len(usable) == 1:
+        score = usable[0][1]
+        confidence = round(min(score, FALLBACK_CAP), 3)
+        return {
+            "confidence": confidence,
+            "attribution": attribution_for(confidence),
+            "mode": "ensemble_fallback",
+        }
+
+    # 2 or 3 usable: renormalize weights over the usable subset, then blend.
+    total_w = sum(w for (w, _) in usable)
+    blend = sum(w * score for (w, score) in usable) / total_w
+
+    # Conflict resolution: strong disagreement -> widen into the uncertain band.
+    scores = [score for (_, score) in usable]
+    conflict = (max(scores) - min(scores)) > DISAGREE_SPREAD
+    if conflict:
+        blend = min(blend, FALLBACK_CAP)
+
+    confidence = round(blend, 3)
+    return {
+        "confidence": confidence,
+        "attribution": attribution_for(confidence),
+        "mode": "ensemble_conflict" if conflict else "ensemble",
+    }

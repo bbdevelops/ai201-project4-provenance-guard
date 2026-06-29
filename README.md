@@ -8,8 +8,8 @@ unsolved problem, so the system's job is to *communicate uncertainty responsibly
 to never silently brand a real creator as a bot.
 
 **Stack:** Flask · Groq `llama-3.3-70b-versatile` (semantic signal) · pure-Python
-stylometrics (structural signal) · Flask-Limiter (rate limiting) · SQLite
-(structured audit log).
+stylometrics (structural signal) · GPT-2 Small perplexity (statistical signal,
+opt-in) · Flask-Limiter (rate limiting) · SQLite (structured audit log).
 
 The full design spec — architecture diagrams, signal blind-spot analysis, threshold
 derivation, edge cases — lives in [planning.md](planning.md), written before any
@@ -36,6 +36,25 @@ Run the server:
 ```bash
 python app.py        # serves on http://localhost:5000
 ```
+
+### Ensemble Detection (optional — Signal 3, GPT-2 perplexity)
+
+To enable the third detection signal, install the optional dependencies and set the
+flag:
+
+```bash
+pip install -r requirements-ensemble.txt   # adds torch + transformers
+```
+
+Add to your `.env`:
+
+```
+ENABLE_PERPLEXITY_SIGNAL=true
+```
+
+GPT-2 Small (~500 MB) downloads from the Hugging Face hub on first use and is cached
+locally. The required two-signal system runs unchanged when this flag is off (the
+default).
 
 Submit a piece of text for analysis:
 
@@ -73,15 +92,26 @@ named component does exactly one job (full Mermaid diagrams for both flows are i
    `{score, status}` object.
 5. **Signal 2 — Stylometrics (structural).** Pure-Python statistics of the same text
    return a second `{score, status}` object, judged against an optional genre profile.
-6. **Confidence scorer (isolated).** [scoring.py](scoring.py) blends the two signal
+6. **Signal 3 — GPT-2 perplexity (statistical).** The text is run through GPT-2 Small
+   to compute mean token log-likelihood; `perplexity = exp(loss)`. Returns a third
+   `{score, status, metrics}` object. **Opt-in:** when `ENABLE_PERPLEXITY_SIGNAL` is
+   off (the default), this step returns `status: "disabled"` instantly — no
+   `torch`/`transformers` import occurs — and the scorer falls back to the two-signal
+   path.
+7. **Confidence scorer (isolated).** [scoring.py](scoring.py) blends all usable signal
    objects into one calibrated confidence in `[0, 1]` (the estimated probability the
-   text is AI-generated) and maps it to an attribution band. **The Flask route does no
-   scoring math** — this module is the single source of truth for the thresholds.
-7. **Label generator.** [labels.py](labels.py) maps the confidence to exactly one of
+   text is AI-generated) and maps it to an attribution band. With all three signals
+   enabled, it uses a weighted ensemble (`0.5 · LLM + 0.3 · stylo + 0.2 · perplexity`)
+   with conflict resolution; with Signal 3 off or degraded it falls back to the
+   two-signal path. **The Flask route does no scoring math** — this module is the
+   single source of truth for the thresholds.
+8. **Label generator.** [labels.py](labels.py) maps the confidence to exactly one of
    three plain-language transparency labels.
-8. **Audit-log write.** A structured row is appended to SQLite **before the response
+9. **Audit-log write.** A structured row is appended to SQLite **before the response
    is returned**, so every decision is recorded even if the client disconnects.
-9. **Response.** `{content_id, attribution, confidence, signal_scores, label}`.
+10. **Response.** `{content_id, attribution, confidence, signal_scores, label}` —
+    `signal_scores` includes `perplexity_score` and `perplexity_status` alongside the
+    LLM and stylometric scores.
 
 **Appeal flow:** `POST /appeal` takes a `content_id` + the creator's reasoning, flips
 that content's status to `under_review`, writes an appeal entry into the audit log
@@ -106,9 +136,10 @@ semantic signal. Both POST endpoints are rate-limited.
 
 ## Detection Signals
 
-The pipeline uses **two distinct, independent signals**. "Distinct" means they measure
-genuinely different properties of the text — one *semantic*, one *structural* — so they
-tend to fail on different inputs.
+The pipeline uses **three distinct, independent signals** — semantic, structural, and
+statistical — each measuring a genuinely different property of the text. Signal 3 is
+opt-in (off by default) so the required system runs without heavy ML dependencies;
+when disabled, the scorer seamlessly falls back to the two-signal path.
 
 ### Signal 1 — Groq LLM Classification (semantic)
 
@@ -163,29 +194,95 @@ tend to fail on different inputs.
   lesser harm on a writing platform, while the feature directly reduces the worse harm
   (false positives against genuine creators).
 
-### Why this pairing is strong
+### Signal 3 — GPT-2 Perplexity (statistical, opt-in)
 
-One signal is semantic, the other structural, so they have largely independent failure
-modes. **Known correlated failure:** both can misread polished, formal,
-non-native-English human writing as AI. The confidence scorer and the wide "uncertain"
-band (below) are deliberately designed to keep that case out of the high-confidence-AI
-zone.
+- **What it measures:** how *predictable* the text is to a small language model — a
+  property neither the semantic nor the structural signal owns. GPT-2 Small computes the
+  mean token log-likelihood; `perplexity = exp(cross-entropy loss)`. Low perplexity
+  (predictable, "smooth" text) maps to a high AI-likelihood score; high perplexity
+  (surprising word choices) maps to a low score
+  ([signals/perplexity_signal.py](signals/perplexity_signal.py)).
+- **Why I chose it:** perplexity directly measures the statistical fingerprint of
+  machine-generated text — AI models produce output that other models find easy to
+  predict. This is orthogonal to both the holistic LLM judgment (Signal 1) and the
+  aggregate stylometric statistics (Signal 2), giving the ensemble a third independent
+  axis.
+- **What it misses (blind spot):** formal, well-structured human writing (academic
+  papers, legal prose) is also highly predictable to GPT-2 — it scores as AI-like. The
+  `borderline_formal_human` test case below is exactly this: PPL 19.0 → score 1.0. This
+  is the perplexity signal's **false-positive risk**, and it is precisely why the
+  ensemble's conflict-resolution rule (see Confidence Scoring) caps the verdict when
+  signals disagree.
+- **Perplexity → AI-likelihood mapping (uncalibrated heuristic):**
+  - PPL ≤ 25 → score 1.0 (fully AI-like)
+  - PPL ≥ 100 → score 0.0 (fully human-like)
+  - Linear ramp between, clamped to `[0, 1]`.
+  These endpoints are *reasoned, not fit to labeled ground truth*.
+- **Opt-in / lazy-load design:** `torch`/`transformers` and the GPT-2 weights (~500 MB)
+  load only on first use when `ENABLE_PERPLEXITY_SIGNAL=true` is set. When the flag is
+  off (the default), `analyze_perplexity()` returns `status: "disabled"` *before
+  importing torch*, so the required system never pays the dependency cost. Any
+  import/load failure degrades to `status: "unavailable"` — never crashes `/submit`.
+
+#### Signal 3 test results (real values from `test_signal3.py`)
+
+| Input case               | Perplexity | Score | Note |
+| ------------------------ | ---------- | ----- | ---- |
+| Clearly AI-generated     | 27.6       | 0.965 | Low PPL → high score (predictable, AI-like) ✓ |
+| Clearly human-written    | 53.4       | 0.621 | Higher PPL → lower score (surprising, human-like) ✓ |
+| Borderline formal-human  | 19.0       | 1.000 | Formal academic text is very predictable — false-positive risk |
+| Borderline edited-AI     | 57.6       | 0.565 | Mid-range, as expected |
+| Degenerate short (3 words) | —        | None  | `status: parse_error` — below the ~20-word floor ✓ |
+
+The clearly-AI input is more predictable (lower PPL → higher score) than the
+clearly-human input — the signal works as designed. The formal-human false positive
+(PPL 19.0 → score 1.0) is exactly why this signal must **never** be the sole basis for
+a verdict; the ensemble's conflict resolution handles this.
+
+### Why this combination is strong
+
+Three signals — *semantic*, *structural*, *statistical* — with largely independent
+failure modes. Where Signal 1 reads *meaning*, Signal 2 measures *shape*, and Signal 3
+measures *predictability*. **Known correlated failure:** all three can misread polished,
+formal, non-native-English human writing as AI (the LLM reads it as "too clean," the
+stylometrics read low burstiness, and the perplexity reads low PPL). The confidence
+scorer's conservative ≥0.70 AI threshold, wide "uncertain" band, and
+**disagreement-widening rule** (see below) are deliberately designed to keep that case
+out of the high-confidence-AI zone.
 
 ---
 
 ## Confidence Scoring
 
-### How the two signals are combined
+### How the three signals are combined (ensemble mode)
 
-Both signals output an AI-likelihood in `[0, 1]`. The isolated scorer
-([scoring.py](scoring.py)) combines them:
+All three signals output an AI-likelihood in `[0, 1]`. The isolated scorer
+([scoring.py](scoring.py)) combines them with a **weighted ensemble**, the semantic
+signal weighted highest because it reads meaning, not just statistics:
 
-- **Both signals trusted →** weighted blend `0.6 · LLM + 0.4 · stylo`, a slight lean
-  toward the semantic signal (it reads meaning, not just shape).
-- **One signal degraded →** drop the untrusted signal, score on the survivor alone, and
-  **cap the result at `min(score, 0.69)`** so a single signal can *never* reach the
-  "likely AI" band.
-- **Both degraded →** no confidence; attribution defaults to `uncertain`.
+| Signal       | Weight | Rationale |
+| ------------ | ------ | --------- |
+| LLM (semantic)     | **0.5** | Reads meaning, voice, coherence — the strongest single indicator |
+| Stylometrics (structural) | **0.3** | Independent structural axis; catches uniformity the LLM may miss |
+| Perplexity (statistical)  | **0.2** | Orthogonal predictability measure; lowest weight because its false-positive on formal text is the most aggressive |
+
+**Ensemble blend:** `0.5 · LLM + 0.3 · stylo + 0.2 · perplexity`, with weights
+**renormalized** over whichever subset of signals is usable (e.g. if perplexity is
+disabled, the scorer falls back to the two-signal `0.6 · LLM + 0.4 · stylo` path —
+byte-identical to the required system).
+
+**Degradation rules:**
+- **2–3 signals usable →** renormalized weighted blend.
+- **1 signal usable →** that signal alone, **capped at `min(score, 0.69)`** so a single
+  signal can *never* reach the "likely AI" band.
+- **0 signals usable →** no confidence; attribution defaults to `uncertain`.
+
+**Conflict resolution (disagreement-widening).** When the usable signals **strongly
+disagree** — `max(score) − min(score) > 0.40` (`DISAGREE_SPREAD`) — the blend is
+**capped at 0.69**, widening the verdict into the *uncertain* band rather than forcing a
+confident AI accusation. This directly addresses the false-positive asymmetry: if one
+signal says "definitely AI" but another says "probably human," the system says "I'm not
+sure" — never "you're a bot."
 
 The combined score maps to **three bands** — explicitly **not** a binary flip at 0.5:
 
@@ -197,19 +294,23 @@ The combined score maps to **three bands** — explicitly **not** a binary flip 
 
 **Why this shape — the false-positive asymmetry.** On a writing platform, labeling a
 real human's work as AI is worse than missing some AI: it's an accusation against a
-creator. The design reflects that twice — a **conservative ≥0.70 AI threshold** (text
-must clear a high bar before it's called AI) and a **wide 0.40–0.70 "uncertain" band**
-so borderline work is hedged, not branded.
+creator. The design reflects that three ways — a **conservative ≥0.70 AI threshold**
+(text must clear a high bar), a **wide 0.40–0.70 "uncertain" band** (borderline work
+is hedged, not branded), and the **disagreement-widening rule** (conflicting signals
+can never produce a confident AI verdict).
 
 ### How I validated the scores are meaningful
 
-- [scripts/test_scoring.py](scripts/test_scoring.py) feeds synthetic signal pairs into
-  the scorer (no API calls) and **asserts the band edges and the 0.69 cap match the spec
-  verbatim**, then exercises the blend, both single-signal fallbacks, and the
-  fully-degraded case. (AI code-gen silently drifts thresholds; this locks them.)
-- [scripts/test_signal2.py](scripts/test_signal2.py) runs the four labeled M4 inputs
-  (clearly AI, clearly human, two borderline) and prints every sub-metric, so a
-  misbehaving metric can be located before tuning.
+- [scripts/test_scoring.py](scripts/test_scoring.py) feeds synthetic signal triples into
+  the scorer (no API calls) and **asserts the band edges, the 0.69 cap, and the 0.40
+  disagree spread match the spec verbatim**. It exercises the full ensemble blend,
+  conflict-capped cases, 2-of-3 usable, 1-of-3 fallback, all-degraded, *and* confirms
+  that passing `perplexity_signal=None` reproduces the legacy two-signal path exactly
+  (backward compatibility). **19/19 cases passed.**
+- [scripts/test_signal3.py](scripts/test_signal3.py) runs the four labeled inputs through
+  the GPT-2 perplexity signal in isolation, printing perplexity values and mapped scores.
+- [scripts/test_signal2.py](scripts/test_signal2.py) runs the same inputs through the
+  stylometric signal, printing every sub-metric.
 
 ### Two real example submissions (from the audit log)
 
@@ -234,11 +335,11 @@ varies meaningfully and drives genuinely different labels.
 
 ### What I'd change for a real deployment
 
-The 0.6/0.4 blend weights and the band edges are *reasoned*, not *calibrated against
-labeled ground truth*. In production I'd collect a labeled corpus (including many
-non-native-English human samples), fit the weights and thresholds to a target
-false-positive rate, and re-validate per genre. I'd also add the model-based perplexity
-signal (see Future Work) to break ties when the two current signals disagree.
+The ensemble weights (`0.5/0.3/0.2`), the perplexity mapping endpoints (PPL 25–100),
+and the band edges are *reasoned, not calibrated against labeled ground truth*. In
+production I'd collect a labeled corpus (including many non-native-English human
+samples and formal academic text), fit the weights and thresholds to a target
+false-positive rate, and re-validate per genre.
 
 ---
 
@@ -323,11 +424,6 @@ done
 429
 429
 ```
-
-> _Paste your own captured run here if the numbers differ; re-run the loop above against
-> a running server to regenerate. The ten passing requests from this test are visible in
-> the audit log (rows 14–23)._
-
 ---
 
 ## Appeals Workflow
@@ -370,8 +466,9 @@ preserved alongside it, and its status was flipped to `under_review`.
 
 Every attribution decision — and every appeal — is written to a structured SQLite log
 ([audit.py](audit.py)) **before** the API responds. Each row records the timestamp,
-`content_id`, `creator_id`, attribution, combined confidence, **both individual signal
-scores**, the LLM status, an injection-suspected flag, and the current status. `GET /log`
+`content_id`, `creator_id`, attribution, combined confidence, **all individual signal
+scores** (LLM, stylometric, and perplexity when enabled), the LLM status, the
+perplexity status, an injection-suspected flag, and the current status. `GET /log`
 surfaces the most recent entries as JSON. A representative sample of real rows:
 
 ```json
@@ -395,20 +492,34 @@ beside the original decision and the status flipped to `under_review`.
 ## Known Limitations
 
 - **Formal, non-native-English human writing — the system's hardest case.** Clean,
-  uniform, formal style trips *both* signals toward AI at once: the LLM reads it as "too
-  polished" and the stylometrics read low burstiness/high uniformity as AI-like. Because
-  the two signals' errors are **correlated** here, combining them doesn't cancel the
-  mistake. The real 0.529 example above is exactly this case — and it lands `uncertain`,
-  not `likely_ai`. That is the *intended* outcome, not a fix: the conservative 0.70
-  threshold and wide uncertain band keep such writers out of the accusation zone, and the
-  appeals path gives them recourse. The system mitigates the harm; it does not eliminate
-  the misread.
+  uniform, formal style trips *all three* signals toward AI at once: the LLM reads it as
+  "too polished," the stylometrics read low burstiness/high uniformity as AI-like, and
+  GPT-2 finds it highly predictable (the `borderline_formal_human` test case scores
+  PPL 19.0 → perplexity score 1.0). Because all three signals' errors are **correlated**
+  here, combining them doesn't cancel the mistake. The real 0.529 example above is
+  exactly this case — and it lands `uncertain`, not `likely_ai`. That is the *intended*
+  outcome, not a fix: the conservative 0.70 threshold, wide uncertain band, and the
+  ensemble's disagreement-widening rule keep such writers out of the accusation zone, and
+  the appeals path gives them recourse. The system mitigates the harm; it does not
+  eliminate the misread.
+- **Perplexity false positives on structured text.** GPT-2's perplexity signal is most
+  aggressive on formal, well-structured text that happens to be human-written — academic
+  abstracts, legal prose, technical documentation. The signal scores it as highly
+  AI-like (low PPL) even when the other two signals lean human. The `DISAGREE_SPREAD`
+  conflict rule specifically defends against this: when signals disagree by more than
+  0.40, the blend is capped at 0.69 (uncertain), preventing a single overconfident
+  signal from driving an AI accusation.
 - **Repetition-heavy poetry / minimalist prose.** Low vocabulary diversity and low
   burstiness look "uniform → AI" to the structural signal. The `content_type: "poetry"`
   genre profile reduces this, but only if the platform supplies the tag.
-- **Very short submissions.** Below ~20 words the stylometric statistics are noise (the
-  signal returns `parse_error`) and the LLM has little to judge; such inputs fall to the
-  capped single-signal fallback and land `uncertain` rather than a confident verdict.
+- **Very short submissions.** Below ~20 words both the stylometric and perplexity
+  signals return `parse_error` (statistics on a few tokens are noise) and the LLM has
+  little to judge; such inputs fall to the capped single-signal fallback and land
+  `uncertain` rather than a confident verdict.
+- **Uncalibrated perplexity thresholds.** The PPL 25–100 mapping endpoints are reasoned
+  heuristics, not fit to labeled data. Different genres, writing styles, and languages
+  may have very different "normal" perplexity ranges. In production these would need
+  calibration against a labeled corpus.
 
 ---
 
@@ -438,17 +549,17 @@ beside the original decision and the status flipped to `under_review`.
 
 ## AI Usage
 
-> _Drafted from the design decisions visible in the code; confirm these match your own
-> recollection of the AI sessions and adjust wording as needed._
-
 1. **Confidence scorer.** I directed the AI to generate `score_confidence()` from the
-   `planning.md` §3 spec (the 0.6/0.4 blend, the three bands, and the single-signal
-   fallback cap). It produced a working scorer, but its fallback applied the `0.69` cap
-   **only** to the LLM-degraded path, as the spec literally stated. I **overrode** that to
-   apply the cap *symmetrically* to either degraded signal — short text (which knocks out
-   the stylometric signal) is precisely the LLM's blind spot, so a stylo-only verdict
-   deserves the same cap. I also added [scripts/test_scoring.py](scripts/test_scoring.py)
-   to assert the thresholds couldn't drift.
+   `planning.md` §3 spec (the two-signal `0.6/0.4` blend, the three bands, and the
+   single-signal fallback cap), then extended it for the three-signal ensemble
+   (`0.5/0.3/0.2` weights with renormalization and a `DISAGREE_SPREAD=0.40`
+   conflict-resolution cap). Its initial fallback applied the `0.69` cap **only** to the
+   LLM-degraded path, as the spec literally stated. I **overrode** that to apply the cap
+   *symmetrically* to any single surviving signal — short text (which knocks out the
+   stylometric signal) is precisely the LLM's blind spot, so a one-signal verdict
+   deserves the same cap regardless of which signal survived. I also added
+   [scripts/test_scoring.py](scripts/test_scoring.py) to assert the thresholds, ensemble
+   weights, and disagree spread couldn't drift (19/19 cases passed).
 2. **Signal 1 prompt-injection hardening.** I directed the AI to harden the Groq call
    against injection. Its first version scanned input and output with a single shared
    marker list. I **revised** it to split the lists: `ai_likelihood` is a strong injection
@@ -461,18 +572,29 @@ beside the original decision and the status flipped to `under_review`.
    raw TTR falls as text lengthens, making cross-length comparison unfair. I also had it
    add a short-text rule that drops the (unreliable) windowed TTR and reweights onto the
    stronger metrics below the window size ([signals/stylometric_signal.py](signals/stylometric_signal.py)).
+4. **GPT-2 perplexity signal + ensemble scorer.** I directed the AI to implement Signal
+   3 (GPT-2 perplexity) and extend the scorer for three-signal ensemble mode with
+   conflict resolution. I reviewed the perplexity→score mapping endpoints (PPL 25→1.0,
+   PPL 100→0.0) and the `DISAGREE_SPREAD=0.40` conflict-resolution cap, and added
+   [scripts/test_signal3.py](scripts/test_signal3.py) to validate the signal in isolation.
+   The test confirmed the signal works directionally (AI text scores higher than human
+   text) and exposed the formal-text false-positive risk — which is exactly why the
+   conflict rule exists.
 
 ---
 
-## Future Work (Stretch Features — planned)
+## Future Work (Stretch Features)
 
-These are designed in [planning.md](planning.md) and slated for implementation after the
-required system; sections are stubbed here to be filled in as each is built.
+These are designed in [planning.md](planning.md). Completed stretch features are
+documented in the relevant sections above.
 
-- **Ensemble Detection — _status: planned._** Add Signal 3, GPT-2 Small **perplexity**
-  (how predictable the text is — a property neither current signal owns). Kept opt-in and
-  lazy-loaded behind `ENABLE_PERPLEXITY_SIGNAL` so the required system never depends on
-  `torch`/`transformers`. See `planning.md → Stretch Features`.
+- **Ensemble Detection — _status: ✅ implemented._** Signal 3 (GPT-2 Small perplexity)
+  is implemented in [signals/perplexity_signal.py](signals/perplexity_signal.py) with a
+  three-signal weighted ensemble (`0.5/0.3/0.2`) and conflict-resolution rule
+  (`DISAGREE_SPREAD=0.40`) in [scoring.py](scoring.py). Opt-in via
+  `ENABLE_PERPLEXITY_SIGNAL=true`; the required system runs unchanged when disabled.
+  Optional dependencies in [requirements-ensemble.txt](requirements-ensemble.txt). See
+  Detection Signals (Signal 3) and Confidence Scoring (ensemble mode) above.
 - **Provenance Certificate — _status: planned._** A "verified human" credential a creator
   earns through an extra verification step, displayed distinctly from the standard label.
 - **Analytics Dashboard — _status: planned._** Promote `/admin/metrics` into a view

@@ -27,10 +27,20 @@ _COLUMNS = (
     "confidence",
     "llm_score",
     "stylo_score",
+    "perplexity_score",
+    "perplexity_status",
     "llm_status",
     "injection_suspected",
     "status",
     "appeal_reasoning",
+)
+
+# Columns added after the original schema shipped (Ensemble Detection stretch).
+# CREATE TABLE IF NOT EXISTS won't add these to a pre-existing audit_log.db, so
+# init_db() ALTERs them in idempotently. (column_name, SQL type).
+_ADDED_COLUMNS = (
+    ("perplexity_score", "REAL"),
+    ("perplexity_status", "TEXT"),
 )
 
 
@@ -55,6 +65,8 @@ def init_db():
                 confidence          REAL,
                 llm_score           REAL,
                 stylo_score         REAL,
+                perplexity_score    REAL,
+                perplexity_status   TEXT,
                 llm_status          TEXT,
                 injection_suspected INTEGER DEFAULT 0,
                 status              TEXT    NOT NULL DEFAULT 'classified',
@@ -62,6 +74,15 @@ def init_db():
             )
             """
         )
+        # Migrate pre-existing databases: add any later columns the CREATE above
+        # won't retrofit. Ignore "duplicate column" so init_db stays idempotent.
+        for name, sql_type in _ADDED_COLUMNS:
+            try:
+                conn.execute(
+                    f"ALTER TABLE audit_log ADD COLUMN {name} {sql_type}"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already exists
         # Speeds up the content_id lookups appeals will do in M5.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_content_id "

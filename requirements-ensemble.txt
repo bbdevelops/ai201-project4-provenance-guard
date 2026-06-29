@@ -1,0 +1,10 @@
+# Optional dependencies for the Ensemble Detection stretch (Signal 3, GPT-2
+# perplexity). The REQUIRED two-signal system does NOT need these — install only
+# to enable the perplexity signal:
+#
+#     pip install -r requirements-ensemble.txt
+#
+# Then set ENABLE_PERPLEXITY_SIGNAL=true in your .env. GPT-2 Small (~500 MB)
+# downloads from the Hugging Face hub on first use and is cached locally.
+torch>=2.0.0
+transformers>=4.40.0

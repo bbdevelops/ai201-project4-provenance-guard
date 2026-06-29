@@ -21,6 +21,7 @@ from audit import get_log, get_submission, init_db, update_status, write_entry
 from labels import generate_label
 from scoring import score_confidence
 from signals.llm_signal import classify_with_llm
+from signals.perplexity_signal import analyze_perplexity
 from signals.stylometric_signal import analyze_stylometrics
 
 app = Flask(__name__)
@@ -69,8 +70,17 @@ def submit():
     stylo_score = signal2["score"]
     stylo_status = signal2["status"]
 
-    # Combine both signals in the isolated scorer (blend + fallback + bands).
-    verdict = score_confidence(signal1, signal2)
+    # Signal 3 — GPT-2 perplexity (Ensemble Detection stretch). Returns "disabled"
+    # fast (no torch import) when ENABLE_PERPLEXITY_SIGNAL is off; in that case we
+    # pass None to the scorer so the required two-signal path runs unchanged.
+    signal3 = analyze_perplexity(text)
+    ppl_score = signal3["score"]
+    ppl_status = signal3["status"]
+    sig3 = signal3 if ppl_status != "disabled" else None
+
+    # Combine signals in the isolated scorer (blend + fallback + bands). With
+    # Signal 3 enabled this is the ensemble path; otherwise the two-signal path.
+    verdict = score_confidence(signal1, signal2, sig3)
     attribution = verdict["attribution"]
     confidence = verdict["confidence"]
 
@@ -83,6 +93,8 @@ def submit():
             "confidence": confidence,
             "llm_score": llm_score,
             "stylo_score": stylo_score,
+            "perplexity_score": ppl_score,
+            "perplexity_status": ppl_status,
             "llm_status": llm_status,
             "injection_suspected": injection_suspected,
             "status": "classified",
@@ -99,6 +111,8 @@ def submit():
                 "llm_status": llm_status,
                 "stylo_score": stylo_score,
                 "stylo_status": stylo_status,
+                "perplexity_score": ppl_score,
+                "perplexity_status": ppl_status,
             },
             "label": generate_label(confidence),
         }

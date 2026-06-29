@@ -286,15 +286,17 @@ before returning a response.**
 ```mermaid
 flowchart TD
     A["Client"] -->|"POST /submit<br/>{text, creator_id, content_type?}"| B["API: validate"]
-    B -->|"text + creator_id"| G{"Rate / abuse gate<br/>IP limit + per-creator<br/>interval vs. last log entry"}
+    B -->|"text + creator_id"| G{"Rate gate<br/>IP limit (Flask-Limiter)<br/>10/min · 100/day"}
     G -->|"rejected"| R429["429 / throttled response"]
     G -->|"allowed: raw text"| C["Assign content_id"]
     C -->|"raw text<br/>role-segregated, delimiter-wrapped,<br/>JSON schema"| D["Signal 1: Groq LLM<br/>semantic + injection defenses"]
     C -->|"raw text + content_type"| E["Signal 2: Stylometric<br/>structural, genre-aware profile"]
-    D -->|"llm score + status"| F["Confidence scorer (isolated)<br/>if llm_status not success:<br/>fallback + cap min(score, 0.69)"]
+    C -->|"raw text"| P["Signal 3: GPT-2 perplexity<br/>statistical (opt-in)<br/>disabled → None to scorer"]
+    D -->|"llm score + status"| F["Confidence scorer (isolated)<br/>ensemble: 0.5·LLM + 0.3·stylo + 0.2·ppl<br/>conflict: spread > 0.40 → cap 0.69<br/>fallback: 1 signal → cap 0.69"]
     E -->|"stylo score + status"| F
+    P -->|"ppl score + status"| F
     F -->|"combined score 0-1"| H["Label generator"]
-    H -->|"attribution + label text"| L[("Audit log write<br/>timestamp, content_id, scores,<br/>llm_status, status=classified")]
+    H -->|"attribution + label text"| L[("Audit log write<br/>timestamp, content_id, all scores,<br/>llm_status, ppl_status,<br/>status=classified")]
     L -->|"persisted"| Z["Response<br/>{content_id, attribution,<br/>confidence, signal_scores, label}"]
 ```
 
@@ -303,7 +305,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["Client"] -->|"POST /appeal<br/>{content_id, creator_reasoning}"| B["API: validate"]
-    B -->|"content_id + reasoning"| G{"Rate / abuse gate<br/>IP limit + per-creator interval"}
+    B -->|"content_id + reasoning"| G{"Rate gate<br/>IP limit (Flask-Limiter)<br/>10/min · 100/day"}
     G -->|"rejected"| R429["429 / throttled response"]
     G -->|"allowed"| C["Lookup content_id"]
     C -->|"original decision found"| D["Status update &rarr; under_review"]
@@ -311,12 +313,13 @@ flowchart TD
     L -->|"persisted"| Z["Response<br/>{content_id,<br/>status: under_review, message}"]
 ```
 
-**Narrative.** *Submission:* raw text enters `/submit`, passes the rate/abuse gate, is assigned a
-`content_id`, scored by the semantic (Groq) and structural (stylometric) signals in parallel, blended
-into one confidence score, mapped to a transparency label, logged, and returned. *Appeal:* a creator
-submits their `content_id` and reasoning; the system finds the original decision, flips status to
-`under_review`, logs the appeal beside that original entry, and confirms — with no automated
-re-classification.
+**Narrative.** *Submission:* raw text enters `/submit`, passes the IP rate gate, is assigned a
+`content_id`, scored by three signals in parallel — semantic (Groq LLM), structural (stylometrics),
+and statistical (GPT-2 perplexity, when enabled) — blended into one confidence score via the
+ensemble scorer with conflict resolution, mapped to a transparency label, logged, and returned.
+*Appeal:* a creator submits their `content_id` and reasoning; the system finds the original
+decision, flips status to `under_review`, logs the appeal beside that original entry, and
+confirms — with no automated re-classification.
 
 ---
 
@@ -391,12 +394,12 @@ to the AI tool, the request, and the verification step:
 
 ---
 
-## Stretch Features (Planned)
+## Stretch Features
 
 Recorded as committed intent. Each is built only after the required features are complete, and this
 planning doc is updated again before work on it begins.
 
-### Ensemble Detection
+### Ensemble Detection — _status: in progress (this section updated before implementation)_
 Add a genuinely distinct *third category* of signal: **Signal 3 — GPT-2 Small perplexity** (mean
 token log-likelihood — a statistical-language-model measure of how *predictable* the text is, since
 AI text is more predictable / lower-perplexity). This is distinct from both the holistic semantic
@@ -411,15 +414,31 @@ It is kept **opt-in and dependency-light** so the required system never depends 
    the signal function (guarded import), so a default install/run never pays the ~500 MB download or
    CPU-load cost. The optional dependencies and the added latency are documented as a deliberate
    tradeoff scoped to the stretch path only.
-3. **Scorer fallback** — Signal 3 returns the same standardized `{score, status}` contract. If the
-   flag is off, the model is unavailable, or it errors, `status != success` and the confidence scorer
-   simply blends the available signals — mirroring the §3 LLM fallback. The ensemble degrades cleanly
-   back to the two-signal system.
+3. **Scorer fallback** — Signal 3 returns the same standardized `{score, status, metrics}` contract,
+   with `status` one of `success | parse_error | disabled | unavailable` (`disabled` = flag off;
+   `unavailable` = `torch`/`transformers`/model not importable or loadable). When the flag is off the
+   signal returns `disabled` **before importing torch**; `app.py` then passes `None` to the scorer so
+   the required two-signal path runs **byte-identically** to today. When the flag is on but the signal
+   degrades (`parse_error`/`unavailable`), the scorer simply blends the remaining usable signals —
+   mirroring the §3 LLM fallback. The ensemble degrades cleanly back to the two-signal system.
 
-**Weighting / voting & conflict resolution:** a weighted blend with the semantic signal weighted
-highest; when the signals strongly disagree, widen toward the uncertain band rather than force a
-verdict (consistent with the §3 false-positive asymmetry). The response surfaces each individual
-signal score alongside the ensemble result.
+**Perplexity → AI-likelihood mapping.** GPT-2 Small computes the mean token log-likelihood of the
+text; `perplexity = exp(cross-entropy loss)`. Low perplexity (predictable text) ⇒ AI-like ⇒ high
+score; high perplexity ⇒ human-like ⇒ low score. The score is a linear ramp between two **uncalibrated
+heuristic** endpoints (≈ PPL 25 → 1.0, ≈ PPL 100 → 0.0), clamped to `[0, 1]`. Inputs below the
+stylometric-style short-text floor (~20 words) return `parse_error` (perplexity on a few tokens is
+noise). These endpoints are reasoned, not fit to labeled ground truth — flagged as such in the README.
+
+**Weighting / voting & conflict resolution (finalized).** The isolated scorer (§3) gains an optional
+third argument. When all three signals are usable it computes a **weighted blend with the semantic
+signal weighted highest** — `0.5 · LLM + 0.3 · stylo + 0.2 · perplexity`. If only some signals are
+usable, weights are **renormalized over the usable set**; a *single* usable signal keeps the §3
+`min(score, 0.69)` cap so one signal can never reach the `likely_ai` band. **Conflict resolution:**
+when the usable signals **strongly disagree** — `max(score) − min(score) > 0.40` (`DISAGREE_SPREAD`)
+— the blend is capped at `0.69`, widening the verdict into the *uncertain* band rather than forcing a
+confident AI accusation (consistent with the §3 false-positive asymmetry). The response and audit log
+surface each individual signal score (`llm_score`, `stylo_score`, `perplexity_score` + statuses)
+alongside the ensemble verdict. The three-band edges (§3) are unchanged.
 
 ### Analytics Dashboard
 Promote `/admin/metrics` (§6) into a dashboard view sourced from the audit log, showing ≥3 metrics:
