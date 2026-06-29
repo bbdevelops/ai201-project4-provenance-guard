@@ -104,3 +104,28 @@ def get_log(limit=20):
             "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_submission(content_id):
+    """Return the original classification row for ``content_id`` (or None).
+
+    Used by /appeal to (a) confirm the content_id exists and (b) carry the
+    original scores onto the appeal row. The idx_audit_content_id index makes
+    this lookup fast.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM audit_log WHERE content_id = ? "
+            "AND event_type = 'classification' ORDER BY id DESC LIMIT 1",
+            (content_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_status(content_id, new_status):
+    """Flip the status of every row for ``content_id`` (e.g. to under_review)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE audit_log SET status = ? WHERE content_id = ?",
+            (new_status, content_id),
+        )

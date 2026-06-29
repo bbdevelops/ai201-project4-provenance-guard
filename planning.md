@@ -265,6 +265,15 @@ M1.)* Auth is a real requirement here; in M1 a simple shared-secret/header check
 while blocking scripted floods). Per-creator minimum interval ~N seconds between a creator's POSTs.
 Final numbers and reasoning are documented in the README at M5.
 
+> **M5 divergence (implemented).** The shipped system applies **IP-based rate limiting only**
+> (Flask-Limiter at `10 per minute; 100 per day` on both POST endpoints, `memory://` storage).
+> The **per-`creator_id` interval check** described above and in §1 step 2 is **not implemented** —
+> it is left as documented future work. Rationale: the IP limiter alone satisfies the required
+> abuse-prevention goal and is cleanly demonstrable (the 12-request test loop returns 200s then 429s);
+> the per-creator interval adds an audit-log query and a tuning constant whose value is hard to justify
+> without real traffic data. The architecture (the audit log already records `creator_id` and
+> timestamps) keeps that enhancement a drop-in addition later.
+
 ---
 
 ## Architecture
