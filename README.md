@@ -597,10 +597,16 @@ documented in the relevant sections above.
   Detection Signals (Signal 3) and Confidence Scoring (ensemble mode) above.
 - **Provenance Certificate — _status: planned._** A "verified human" credential a creator
   earns through an extra verification step, displayed distinctly from the standard label.
-- **Analytics Dashboard — _status: planned._** Promote `/admin/metrics` into a view
-  showing AI-vs-human verdict ratio, appeal rate, and `injection_flagged` rate.
-- **Multi-Modal Support — _status: planned._** Extend the pipeline to a second content
-  type (e.g. image descriptions or structured metadata).
+- **Analytics Dashboard — _status: ✅ implemented._** `GET /dashboard` serves a
+  server-rendered HTML page showing three metrics from the audit log: detection
+  pattern (AI / uncertain / human ratio as a Chart.js doughnut), appeal rate, and
+  injection-flagged rate (security telemetry) — both as horizontal bars. The
+  dashboard **live-updates** every 5 seconds via `GET /dashboard/metrics` (JS
+  polling) and includes a **scrollable audit log table** showing recent entries
+  with attribution badges, signal scores, and status pills. Data aggregation in
+  [audit.py](audit.py) (`get_dashboard_metrics()`), route and inline template in
+  [app.py](app.py). No auth required — visit `http://localhost:5000/dashboard`
+  while the server is running.
 
 ---
 

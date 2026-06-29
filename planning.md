@@ -440,10 +440,28 @@ confident AI accusation (consistent with the §3 false-positive asymmetry). The 
 surface each individual signal score (`llm_score`, `stylo_score`, `perplexity_score` + statuses)
 alongside the ensemble verdict. The three-band edges (§3) are unchanged.
 
-### Analytics Dashboard
-Promote `/admin/metrics` (§6) into a dashboard view sourced from the audit log, showing ≥3 metrics:
-**AI-vs-human verdict ratio**, **appeal rate**, and a third — the `injection_flagged` rate (security
-telemetry) and/or the share of submissions landing in the uncertain band.
+### Analytics Dashboard — _status: ✅ implemented (this section updated before implementation)_
+`GET /dashboard` serves a server-rendered HTML page (via `render_template_string`) showing three
+metrics sourced from the SQLite audit log:
+1. **Detection pattern** — counts and percentages for `likely_ai`, `uncertain`, and `likely_human`
+   classifications, visualized as a Chart.js doughnut chart.
+2. **Appeal rate** — `total_appeals / total_classifications`, shown as a horizontal bar.
+3. **Injection-flagged rate** — `injection_suspected / total_classifications` (security telemetry),
+   shown alongside the appeal rate.
+
+**Live updates.** A `setInterval` JavaScript loop polls `GET /dashboard/metrics` every 5 seconds and
+updates all cards, charts, raw metrics table, and the audit log table in-place — no manual browser
+refresh needed. The JSON endpoint returns both `get_dashboard_metrics()` and `get_log()` in a single
+response so the dashboard stays fully synchronized with one fetch per cycle.
+
+**Embedded audit log.** The dashboard includes a scrollable table showing recent `audit_log` rows —
+timestamp, event type (with `appeal` events highlighted), content ID, attribution badge, confidence,
+signal scores, and status — so the full audit trail is accessible without leaving the dashboard.
+
+Data aggregation lives in `audit.py` (`get_dashboard_metrics()`); the route, JSON polling endpoint,
+and inline HTML template live in `app.py`. No authentication (consistent with `/log`). Chart.js
+loaded via CDN. The dashboard handles the empty-database edge case gracefully (all zeros, no
+division errors).
 
 ---
 

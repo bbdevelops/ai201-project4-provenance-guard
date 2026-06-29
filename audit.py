@@ -150,3 +150,61 @@ def update_status(content_id, new_status):
             "UPDATE audit_log SET status = ? WHERE content_id = ?",
             (new_status, content_id),
         )
+
+
+def get_dashboard_metrics():
+    """Aggregate audit-log data for the analytics dashboard.
+
+    Returns a dict with everything the ``/dashboard`` template needs:
+      - Detection pattern: counts per attribution band + total classifications.
+      - Appeal rate: total appeals / total classifications.
+      - Injection-flagged rate: flagged classifications / total classifications.
+
+    All rates default to 0.0 when the database is empty (no division-by-zero).
+    """
+    with _connect() as conn:
+        # 1. Detection pattern — classification counts by attribution.
+        rows = conn.execute(
+            "SELECT attribution, COUNT(*) AS cnt "
+            "FROM audit_log WHERE event_type = 'classification' "
+            "GROUP BY attribution"
+        ).fetchall()
+        counts = {row["attribution"]: row["cnt"] for row in rows}
+        likely_ai = counts.get("likely_ai", 0)
+        uncertain = counts.get("uncertain", 0)
+        likely_human = counts.get("likely_human", 0)
+        total_classifications = likely_ai + uncertain + likely_human
+
+        # 2. Appeal rate — appeal events / total classifications.
+        total_appeals = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM audit_log "
+            "WHERE event_type = 'appeal'"
+        ).fetchone()["cnt"]
+
+        # 3. Injection-flagged rate — flagged classifications / total.
+        total_injection_flagged = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM audit_log "
+            "WHERE event_type = 'classification' AND injection_suspected = 1"
+        ).fetchone()["cnt"]
+
+    appeal_rate = (
+        round(total_appeals / total_classifications, 4)
+        if total_classifications > 0
+        else 0.0
+    )
+    injection_rate = (
+        round(total_injection_flagged / total_classifications, 4)
+        if total_classifications > 0
+        else 0.0
+    )
+
+    return {
+        "total_classifications": total_classifications,
+        "likely_ai_count": likely_ai,
+        "uncertain_count": uncertain,
+        "likely_human_count": likely_human,
+        "total_appeals": total_appeals,
+        "appeal_rate": appeal_rate,
+        "total_injection_flagged": total_injection_flagged,
+        "injection_rate": injection_rate,
+    }
