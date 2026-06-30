@@ -56,7 +56,7 @@ GPT-2 Small (~500 MB) downloads from the Hugging Face hub on first use and is ca
 locally. The required two-signal system runs unchanged when this flag is off (the
 default).
 
-Submit a piece of text for analysis:
+Submit a piece of text for analysis (Terminal):
 
 ```bash
 curl -s -X POST http://localhost:5000/submit \
@@ -73,6 +73,10 @@ curl -s -X POST http://localhost:5000/appeal \
     -d '{"content_id": "PASTE-CONTENT-ID-HERE", "creator_reasoning": "I wrote this myself from personal experience."}' \
     | python -m json.tool
 ```
+
+### Dummy Platform UI
+
+Alternatively, visit **http://localhost:5000/dummy** in your browser to submit text and file appeals interactively through a simulated creative writing platform interface.
 
 ---
 
@@ -580,6 +584,7 @@ beside the original decision and the status flipped to `under_review`.
    The test confirmed the signal works directionally (AI text scores higher than human
    text) and exposed the formal-text false-positive risk — which is exactly why the
    conflict rule exists.
+5. **Analytics Dashboard & Dummy Platform.** I directed the AI to extract the monolithic HTML dashboard string from `app.py` into separate templates in a `templates/` directory, implementing `render_template`. I then instructed it to build a Dummy Platform UI (`templates/dummy.html`) to interactively test submissions, and refine the dashboard into a professional 3-column layout displaying additional audit log data (Perplexity & Creator ID).
 
 ---
 
@@ -595,19 +600,11 @@ documented in the relevant sections above.
   `ENABLE_PERPLEXITY_SIGNAL=true`; the required system runs unchanged when disabled.
   Optional dependencies in [requirements-ensemble.txt](requirements-ensemble.txt). See
   Detection Signals (Signal 3) and Confidence Scoring (ensemble mode) above.
+- **Analytics Dashboard & Dummy Platform — _status: ✅ implemented._** 
+  - **Dashboard (`GET /dashboard`)**: Serves an HTML page via `templates/dashboard.html` with a clean 3-column layout. It shows three metrics from the audit log: detection pattern (Chart.js doughnut), appeal rate, and injection-flagged rate (horizontal bars). It **live-updates** every 5 seconds via `GET /dashboard/metrics` (JS polling) and includes a **scrollable audit log table** showing recent entries with attribution badges, creator IDs, and all signal scores. Data aggregation in [audit.py](audit.py).
+  - **Dummy Platform (`GET /dummy`)**: Serves a simulated writing platform UI via `templates/dummy.html` that allows users to test the submission and appeal APIs directly in the browser.
 - **Provenance Certificate — _status: planned._** A "verified human" credential a creator
   earns through an extra verification step, displayed distinctly from the standard label.
-- **Analytics Dashboard — _status: ✅ implemented._** `GET /dashboard` serves a
-  server-rendered HTML page showing three metrics from the audit log: detection
-  pattern (AI / uncertain / human ratio as a Chart.js doughnut), appeal rate, and
-  injection-flagged rate (security telemetry) — both as horizontal bars. The
-  dashboard **live-updates** every 5 seconds via `GET /dashboard/metrics` (JS
-  polling) and includes a **scrollable audit log table** showing recent entries
-  with attribution badges, signal scores, and status pills. Data aggregation in
-  [audit.py](audit.py) (`get_dashboard_metrics()`), route and inline template in
-  [app.py](app.py). No auth required — visit `http://localhost:5000/dashboard`
-  while the server is running.
-
 ---
 
 ## Portfolio Walkthrough

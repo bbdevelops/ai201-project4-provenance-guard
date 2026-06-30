@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creator Platform — Submit Work</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f1117;
+      color: #e4e4e7;
+      min-height: 100vh;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: .5rem;
+      color: #e4e4e7;
+    }
+
+    p.subtitle {
+      color: #71717a;
+      font-size: .9rem;
+      margin-bottom: 2rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 500;
+      color: #a1a1aa;
+      margin-bottom: .5rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    textarea {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      color: #e4e4e7;
+      padding: 1rem;
+      font-family: inherit;
+      font-size: 1rem;
+      resize: vertical;
+      min-height: 150px;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    button {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: .75rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    
+    button:hover { background: #4f46e5; }
+    button:disabled { background: #3f3f46; cursor: not-allowed; }
+
+    #results {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      border-radius: 8px;
+      background: #27272a;
+      display: none;
+    }
+
+    #results h2 {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    #label-text {
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      border-radius: 6px;
+      background: #18181b;
+      border-left: 4px solid #a1a1aa;
+    }
+
+    #appeal-section {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #3f3f46;
+      display: none;
+    }
+
+    .appeal-btn {
+      background: #fbbf24;
+      color: #18181b;
+    }
+    .appeal-btn:hover { background: #f59e0b; }
+    
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  
+  <div class="container">
+    <h1>Publish Your Work</h1>
+    <p class="subtitle">Submit your writing to the platform. Our automated system will review it.</p>
+
+    <div class="form-group">
+      <label for="text-input">Your Story/Poem/Article</label>
+      <textarea id="text-input" placeholder="Once upon a time..."></textarea>
+    </div>
+
+    <button id="submit-btn" onclick="submitWork()">Submit for Review</button>
+
+    <!-- Results Section -->
+    <div id="results">
+      <h2>Automated Review Results</h2>
+      <div id="label-text"></div>
+      <p style="font-size: 0.85rem; color: #a1a1aa;">Internal Confidence Score: <span id="confidence-score"></span></p>
+
+      <!-- Appeal Section -->
+      <div id="appeal-section">
+        <label for="appeal-reasoning">If you believe this was classified incorrectly, you can appeal:</label>
+        <textarea id="appeal-reasoning" style="min-height: 80px; margin-bottom: 1rem;" placeholder="I wrote this myself. My style is just formal..."></textarea>
+        <button id="appeal-btn" class="appeal-btn" onclick="submitAppeal()">Submit Appeal</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentContentId = null;
+
+    async function submitWork() {
+      const text = document.getElementById('text-input').value;
+      const btn = document.getElementById('submit-btn');
+      if (!text.trim()) return alert("Please enter some text.");
+
+      btn.disabled = true;
+      btn.innerText = "Analyzing...";
+
+      try {
+        const response = await fetch('/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: text,
+            creator_id: "demo-user-" + Math.floor(Math.random() * 1000)
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Submission failed");
+
+        currentContentId = data.content_id;
+        
+        // Show results
+        const resultsDiv = document.getElementById('results');
+        const labelText = document.getElementById('label-text');
+        const appealSection = document.getElementById('appeal-section');
+        
+        resultsDiv.style.display = 'block';
+        labelText.innerText = data.label;
+        document.getElementById('confidence-score').innerText = (data.confidence !== null ? data.confidence.toFixed(3) : "None");
+
+        // Styling the label border based on attribution
+        if (data.attribution === "likely_ai") {
+          labelText.style.borderLeftColor = "#f87171";
+          appealSection.style.display = "block";
+        } else if (data.attribution === "uncertain") {
+          labelText.style.borderLeftColor = "#fbbf24";
+          appealSection.style.display = "block";
+        } else {
+          labelText.style.borderLeftColor = "#4ade80";
+          appealSection.style.display = "none";
+        }
+
+      } catch (e) {
+        alert("Error: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Submit for Review";
+      }
+    }
+
+    async function submitAppeal() {
+      const reasoning = document.getElementById('appeal-reasoning').value;
+      const btn = document.getElementById('appeal-btn');
+      if (!reasoning.trim()) return alert("Please enter your reasoning.");
+
+      btn.disabled = true;
+      btn.innerText = "Submitting...";
+
+      try {
+        const response = await fetch('/appeal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content_id: currentContentId,
+            creator_reasoning: reasoning
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Appeal failed");
+
+        alert("Appeal submitted successfully! It is now under review.");
+        document.getElementById('appeal-section').style.display = "none";
+      } catch (e) {
+        alert("Error: " + e.message);
+        btn.disabled = false;
+        btn.innerText = "Submit Appeal";
+      }
+    }
+  </script>
+</body>
+</html>
