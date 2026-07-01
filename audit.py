@@ -34,6 +34,8 @@ _COLUMNS = (
     "injection_suspected",
     "status",
     "appeal_reasoning",
+    "text",
+    "reviewer_note",
 )
 
 # Columns added after the original schema shipped (Ensemble Detection stretch).
@@ -42,6 +44,8 @@ _COLUMNS = (
 _ADDED_COLUMNS = (
     ("perplexity_score", "REAL"),
     ("perplexity_status", "TEXT"),
+    ("text", "TEXT"),
+    ("reviewer_note", "TEXT"),
 )
 
 
@@ -218,3 +222,79 @@ def get_dashboard_metrics():
         "total_injection_flagged": total_injection_flagged,
         "injection_rate": injection_rate,
     }
+
+
+def get_pending_appeals():
+    """Return a list of appeals that are currently 'under_review'.
+    
+    This joins the appeal row with the original classification row to include
+    the text that was classified.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT 
+                a.content_id, a.timestamp AS appeal_time, a.appeal_reasoning,
+                a.llm_score, a.stylo_score, a.perplexity_score,
+                a.attribution, a.confidence,
+                c.text
+            FROM audit_log a
+            JOIN audit_log c ON a.content_id = c.content_id AND c.event_type = 'classification'
+            WHERE a.status = 'under_review' AND a.event_type = 'appeal'
+            ORDER BY a.id DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_appeal_details(content_id):
+    """Return the full details of a specific appeal for the review page."""
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 
+                a.content_id, a.timestamp AS appeal_time, a.appeal_reasoning,
+                a.llm_score, a.stylo_score, a.perplexity_score,
+                a.attribution, a.confidence, a.status, a.reviewer_note,
+                c.text
+            FROM audit_log a
+            JOIN audit_log c ON a.content_id = c.content_id AND c.event_type = 'classification'
+            WHERE a.content_id = ? AND a.event_type = 'appeal'
+            ORDER BY a.id DESC LIMIT 1
+            """,
+            (content_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def resolve_appeal(content_id, new_attribution, reviewer_note):
+    """Resolve an appeal by updating status to 'resolved' and logging the decision."""
+    # First, get the appeal record to carry over scores
+    with _connect() as conn:
+        appeal = conn.execute(
+            "SELECT * FROM audit_log WHERE content_id = ? AND event_type = 'appeal' ORDER BY id DESC LIMIT 1",
+            (content_id,)
+        ).fetchone()
+        
+    if not appeal:
+        return False
+        
+    # Update status of all related records to 'resolved'
+    update_status(content_id, "resolved")
+    
+    # Write a new entry for the resolution
+    write_entry({
+        "content_id": content_id,
+        "creator_id": appeal["creator_id"],
+        "event_type": "appeal_resolved",
+        "attribution": new_attribution,
+        "confidence": appeal["confidence"], # Keep original confidence or nullify? We'll keep it.
+        "llm_score": appeal["llm_score"],
+        "stylo_score": appeal["stylo_score"],
+        "perplexity_score": appeal["perplexity_score"],
+        "llm_status": appeal["llm_status"],
+        "status": "resolved",
+        "reviewer_note": reviewer_note,
+        "appeal_reasoning": appeal["appeal_reasoning"]
+    })
+    return True

@@ -1,11 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Provenance Guard — Analytics Dashboard</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
       font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -32,16 +39,25 @@
 
     .live-dot {
       display: inline-block;
-      width: 8px; height: 8px;
+      width: 8px;
+      height: 8px;
       background: #4ade80;
       border-radius: 50%;
       margin-left: .5rem;
       vertical-align: middle;
       animation: pulse 2s infinite;
     }
+
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: .3; }
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: .3;
+      }
     }
 
     /* ---- Summary cards ---- */
@@ -59,15 +75,23 @@
       padding: 1.25rem;
       transition: border-color .2s;
     }
-    .card:hover { border-color: #3f3f46; }
 
-    .card .emoji { font-size: 1.5rem; margin-bottom: .5rem; }
+    .card:hover {
+      border-color: #3f3f46;
+    }
+
+    .card .emoji {
+      font-size: 1.5rem;
+      margin-bottom: .5rem;
+    }
+
     .card .value {
       font-size: 2rem;
       font-weight: 700;
       line-height: 1.1;
       transition: color .3s;
     }
+
     .card .label {
       font-size: .75rem;
       color: #a1a1aa;
@@ -75,16 +99,28 @@
       letter-spacing: .05em;
       margin-top: .35rem;
     }
+
     .card .pct {
       font-size: .85rem;
       color: #71717a;
       margin-top: .15rem;
     }
 
-    .card.ai    .value { color: #f87171; }
-    .card.uncertain .value { color: #fbbf24; }
-    .card.human .value { color: #4ade80; }
-    .card.total .value { color: #a78bfa; }
+    .card.ai .value {
+      color: #f87171;
+    }
+
+    .card.uncertain .value {
+      color: #fbbf24;
+    }
+
+    .card.human .value {
+      color: #4ade80;
+    }
+
+    .card.total .value {
+      color: #a78bfa;
+    }
 
     /* ---- Middle Row (Charts + Metrics) ---- */
     .dashboard-middle {
@@ -93,8 +129,11 @@
       gap: 1.5rem;
       margin-bottom: 2rem;
     }
+
     @media (max-width: 1000px) {
-      .dashboard-middle { grid-template-columns: 1fr; }
+      .dashboard-middle {
+        grid-template-columns: 1fr;
+      }
     }
 
     .chart-box {
@@ -105,12 +144,14 @@
       display: flex;
       flex-direction: column;
     }
+
     .chart-box h2 {
       font-size: .95rem;
       font-weight: 600;
       margin-bottom: 1rem;
       color: #d4d4d8;
     }
+
     .chart-container {
       position: relative;
       flex-grow: 1;
@@ -118,33 +159,43 @@
     }
 
     /* ---- Detail / log tables ---- */
-    .detail, .audit-log {
+    .detail,
+    .audit-log {
       background: #18181b;
       border: 1px solid #27272a;
       border-radius: 12px;
       padding: 1.5rem;
     }
+
     .audit-log {
       margin-bottom: 2rem;
     }
 
-    .detail h2, .audit-log h2 {
+    .detail h2,
+    .audit-log h2 {
       font-size: .95rem;
       font-weight: 600;
       margin-bottom: 1rem;
       color: #d4d4d8;
     }
-    .detail table, .audit-log table {
+
+    .detail table,
+    .audit-log table {
       width: 100%;
       border-collapse: collapse;
     }
-    .detail th, .detail td,
-    .audit-log th, .audit-log td {
+
+    .detail th,
+    .detail td,
+    .audit-log th,
+    .audit-log td {
       text-align: left;
       padding: .45rem .6rem;
       font-size: .8rem;
     }
-    .detail th, .audit-log th {
+
+    .detail th,
+    .audit-log th {
       color: #a1a1aa;
       font-weight: 500;
       border-bottom: 1px solid #27272a;
@@ -152,11 +203,16 @@
       top: 0;
       background: #18181b;
     }
-    .detail td, .audit-log td {
+
+    .detail td,
+    .audit-log td {
       border-bottom: 1px solid #1e1e22;
     }
+
     .detail tr:last-child td,
-    .audit-log tr:last-child td { border-bottom: none; }
+    .audit-log tr:last-child td {
+      border-bottom: none;
+    }
 
     .audit-log .scroll {
       max-height: 400px;
@@ -172,9 +228,21 @@
       font-weight: 600;
       white-space: nowrap;
     }
-    .badge.likely_ai    { background: #3b1520; color: #f87171; }
-    .badge.uncertain    { background: #3b2f10; color: #fbbf24; }
-    .badge.likely_human { background: #103b20; color: #4ade80; }
+
+    .badge.likely_ai {
+      background: #3b1520;
+      color: #f87171;
+    }
+
+    .badge.uncertain {
+      background: #3b2f10;
+      color: #fbbf24;
+    }
+
+    .badge.likely_human {
+      background: #103b20;
+      color: #4ade80;
+    }
 
     .status-pill {
       display: inline-block;
@@ -183,15 +251,37 @@
       font-size: .7rem;
       white-space: nowrap;
     }
-    .status-pill.classified    { background: #27272a; color: #a1a1aa; }
-    .status-pill.under_review  { background: #3b2f10; color: #fbbf24; }
 
-    .event-appeal { color: #818cf8; font-weight: 600; }
+    .status-pill.classified {
+      background: #27272a;
+      color: #a1a1aa;
+    }
+
+    .status-pill.under_review {
+      background: #3b2f10;
+      color: #fbbf24;
+    }
+
+    .event-appeal {
+      color: #818cf8;
+      font-weight: 600;
+    }
+    .review-link {
+      color: #6366f1;
+      text-decoration: none;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+    .review-link:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
+
 <body>
-  <h1>盾️ Provenance Guard — Analytics <span class="live-dot" title="Live — auto-refreshes every 5s"></span></h1>
-  <p class="subtitle">Detection patterns, appeal rate, and security telemetry — sourced from the audit log. Updates live.</p>
+  <h1>🛡️ Provenance Guard — Analytics <span class="live-dot" title="Live — auto-refreshes every 5s"></span></h1>
+  <p class="subtitle">Detection patterns, appeal rate, and security telemetry — sourced from the audit log. Updates
+    live.</p>
 
   <!-- Summary cards -->
   <div class="cards">
@@ -204,19 +294,22 @@
       <div class="emoji">🤖</div>
       <div class="value" id="card-ai">{{ likely_ai_count }}</div>
       <div class="label">Likely AI</div>
-      <div class="pct" id="card-ai-pct">{{ "%.1f"|format(likely_ai_count / total_classifications * 100) if total_classifications > 0 else "0.0" }}%</div>
+      <div class="pct" id="card-ai-pct">{{ "%.1f"|format(likely_ai_count / total_classifications * 100) if
+        total_classifications > 0 else "0.0" }}%</div>
     </div>
     <div class="card uncertain">
       <div class="emoji">❓</div>
       <div class="value" id="card-uncertain">{{ uncertain_count }}</div>
       <div class="label">Uncertain</div>
-      <div class="pct" id="card-uncertain-pct">{{ "%.1f"|format(uncertain_count / total_classifications * 100) if total_classifications > 0 else "0.0" }}%</div>
+      <div class="pct" id="card-uncertain-pct">{{ "%.1f"|format(uncertain_count / total_classifications * 100) if
+        total_classifications > 0 else "0.0" }}%</div>
     </div>
     <div class="card human">
       <div class="emoji">✍️</div>
       <div class="value" id="card-human">{{ likely_human_count }}</div>
       <div class="label">Likely Human</div>
-      <div class="pct" id="card-human-pct">{{ "%.1f"|format(likely_human_count / total_classifications * 100) if total_classifications > 0 else "0.0" }}%</div>
+      <div class="pct" id="card-human-pct">{{ "%.1f"|format(likely_human_count / total_classifications * 100) if
+        total_classifications > 0 else "0.0" }}%</div>
     </div>
   </div>
 
@@ -229,7 +322,7 @@
         <canvas id="detectionChart"></canvas>
       </div>
     </div>
-    
+
     <!-- Chart 2 -->
     <div class="chart-box">
       <h2>Appeal Rate &amp; Injection-Flagged Rate</h2>
@@ -242,15 +335,42 @@
     <div class="detail">
       <h2>Raw Metrics</h2>
       <table>
-        <tr><th>Metric</th><th>Value</th></tr>
-        <tr><td>Total classifications</td><td id="raw-total">{{ total_classifications }}</td></tr>
-        <tr><td>Likely AI</td><td id="raw-ai">{{ likely_ai_count }}</td></tr>
-        <tr><td>Uncertain</td><td id="raw-uncertain">{{ uncertain_count }}</td></tr>
-        <tr><td>Likely Human</td><td id="raw-human">{{ likely_human_count }}</td></tr>
-        <tr><td>Total appeals</td><td id="raw-appeals">{{ total_appeals }}</td></tr>
-        <tr><td>Appeal rate</td><td id="raw-appeal-rate">{{ "%.2f"|format(appeal_rate * 100) }}%</td></tr>
-        <tr><td>Injection-flagged</td><td id="raw-injection">{{ total_injection_flagged }}</td></tr>
-        <tr><td>Injection rate</td><td id="raw-injection-rate">{{ "%.2f"|format(injection_rate * 100) }}%</td></tr>
+        <tr>
+          <th>Metric</th>
+          <th>Value</th>
+        </tr>
+        <tr>
+          <td>Total classifications</td>
+          <td id="raw-total">{{ total_classifications }}</td>
+        </tr>
+        <tr>
+          <td>Likely AI</td>
+          <td id="raw-ai">{{ likely_ai_count }}</td>
+        </tr>
+        <tr>
+          <td>Uncertain</td>
+          <td id="raw-uncertain">{{ uncertain_count }}</td>
+        </tr>
+        <tr>
+          <td>Likely Human</td>
+          <td id="raw-human">{{ likely_human_count }}</td>
+        </tr>
+        <tr>
+          <td>Total appeals</td>
+          <td id="raw-appeals">{{ total_appeals }}</td>
+        </tr>
+        <tr>
+          <td>Appeal rate</td>
+          <td id="raw-appeal-rate">{{ "%.2f"|format(appeal_rate * 100) }}%</td>
+        </tr>
+        <tr>
+          <td>Injection-flagged</td>
+          <td id="raw-injection">{{ total_injection_flagged }}</td>
+        </tr>
+        <tr>
+          <td>Injection rate</td>
+          <td id="raw-injection-rate">{{ "%.2f"|format(injection_rate * 100) }}%</td>
+        </tr>
       </table>
     </div>
   </div>
@@ -290,31 +410,31 @@
         labels: ['Likely AI', 'Uncertain', 'Likely Human'],
         datasets: [{
           data: [{{ likely_ai_count }}, {{ uncertain_count }}, {{ likely_human_count }}],
-          backgroundColor: ['#f87171', '#fbbf24', '#4ade80'],
-          borderColor: '#18181b',
-          borderWidth: 3
+    backgroundColor: ['#f87171', '#fbbf24', '#4ade80'],
+      borderColor: '#18181b',
+        borderWidth: 3
         }]
       },
-      options: {
-        responsive: true,
+    options: {
+      responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
+          plugins: {
+        legend: {
+          position: 'bottom',
             labels: { color: '#a1a1aa', padding: 16, font: { size: 13 } }
-          },
-          tooltip: {
-            callbacks: {
-              label: function(ctx) {
-                var total = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                var pct = total > 0 ? (ctx.raw / total * 100).toFixed(1) : '0.0';
-                return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
-              }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              var pct = total > 0 ? (ctx.raw / total * 100).toFixed(1) : '0.0';
+              return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
             }
           }
-        },
-        cutout: '55%'
-      }
+        }
+      },
+      cutout: '55%'
+    }
     });
 
     var ratesChart = new Chart(document.getElementById('ratesChart'), {
@@ -324,43 +444,43 @@
         datasets: [{
           label: 'Rate (%)',
           data: [
-            {{ "%.2f"|format(appeal_rate * 100) }},
-            {{ "%.2f"|format(injection_rate * 100) }}
+            {{ "%.2f"| format(appeal_rate * 100) }},
+        {{ "%.2f"| format(injection_rate * 100) }}
           ],
-          backgroundColor: ['#818cf8', '#fb923c'],
-          borderColor: ['#6366f1', '#f97316'],
-          borderWidth: 1,
+    backgroundColor: ['#818cf8', '#fb923c'],
+      borderColor: ['#6366f1', '#f97316'],
+        borderWidth: 1,
           borderRadius: 6,
-          barPercentage: 0.5
+            barPercentage: 0.5
         }]
       },
-      options: {
-        responsive: true,
+    options: {
+      responsive: true,
         maintainAspectRatio: false,
-        indexAxis: 'y',
-        scales: {
-          x: {
-            beginAtZero: true,
+          indexAxis: 'y',
+            scales: {
+        x: {
+          beginAtZero: true,
             max: 100,
-            ticks: { color: '#71717a', callback: v => v + '%' },
-            grid: { color: '#27272a' }
-          },
-          y: {
-            ticks: { color: '#a1a1aa', font: { size: 13 } },
-            grid: { display: false }
-          }
+              ticks: { color: '#71717a', callback: v => v + '%' },
+          grid: { color: '#27272a' }
         },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function(ctx) {
-                return ctx.raw.toFixed(2) + '%';
-              }
+        y: {
+          ticks: { color: '#a1a1aa', font: { size: 13 } },
+          grid: { display: false }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ctx.raw.toFixed(2) + '%';
             }
           }
         }
       }
+    }
     });
 
     // ---- Helper: render a single log row ----
@@ -377,10 +497,15 @@
       var status = e.status || '';
       var statusClass = status.replace(' ', '_');
       var cid = (e.content_id || '').substring(0, 8) + '…';
-      
+
+      var actionLink = '';
+      if (evt === 'appeal' && status === 'under_review') {
+        actionLink = ' <a href="/review/' + e.content_id + '" class="review-link" target="_blank">Review ↗</a>';
+      }
+
       return '<tr>'
         + '<td>' + ts + '</td>'
-        + '<td' + evtClass + '>' + evt + '</td>'
+        + '<td' + evtClass + '>' + evt + actionLink + '</td>'
         + '<td title="' + (e.content_id || '') + '">' + cid + '</td>'
         + '<td>' + creator + '</td>'
         + '<td><span class="badge ' + attr + '">' + attr.replace('_', ' ') + '</span></td>'
@@ -437,7 +562,7 @@
           var body = document.getElementById('log-body');
           body.innerHTML = d.log.map(renderLogRow).join('');
         })
-        .catch(function() {}); // silent on network blips
+        .catch(function () { }); // silent on network blips
     }
 
     // Initial load + recurring poll
@@ -445,4 +570,5 @@
     setInterval(refresh, 5000);
   </script>
 </body>
+
 </html>

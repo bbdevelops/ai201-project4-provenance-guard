@@ -71,6 +71,13 @@ def score_confidence(llm_signal, stylo_signal, perplexity_signal=None):
     three-signal path runs instead — see ``_score_ensemble`` — with modes
     "ensemble", "ensemble_conflict", "ensemble_fallback", and "degraded".
     """
+    if llm_signal.get("status") == "injection_flagged":
+        return {
+            "confidence": None,
+            "attribution": "uncertain",
+            "mode": "injection_rejected",
+        }
+
     if perplexity_signal is not None:
         return _score_ensemble(llm_signal, stylo_signal, perplexity_signal)
 

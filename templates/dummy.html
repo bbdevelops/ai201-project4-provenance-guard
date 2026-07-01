@@ -123,6 +123,19 @@
     .appeal-btn:hover { background: #f59e0b; }
     
     .hidden { display: none; }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: .15rem .5rem;
+      border-radius: 6px;
+      font-size: .75rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge.likely_ai { background: #3b1520; color: #f87171; }
+    .badge.uncertain { background: #3b2f10; color: #fbbf24; }
+    .badge.likely_human { background: #103b20; color: #4ade80; }
   </style>
 </head>
 <body>
@@ -141,6 +154,7 @@
     <!-- Results Section -->
     <div id="results">
       <h2>Automated Review Results</h2>
+      <p id="submission-id-text" style="font-size: 0.85rem; color: #a1a1aa; margin-bottom: 0.5rem;">Submission ID: <strong id="submission-id" style="color: #e4e4e7;"></strong> (Save this to check status later)</p>
       <div id="label-text"></div>
       <p style="font-size: 0.85rem; color: #a1a1aa;">Internal Confidence Score: <span id="confidence-score"></span></p>
 
@@ -151,6 +165,27 @@
         <button id="appeal-btn" class="appeal-btn" onclick="submitAppeal()">Submit Appeal</button>
       </div>
     </div>
+
+    <!-- Check Status Section -->
+    <div id="check-status-section" style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #3f3f46;">
+      <h2>Check Submission Status</h2>
+      <div class="form-group" style="margin-top: 1rem;">
+        <label for="status-content-id">Content ID</label>
+        <div style="display: flex; gap: 1rem;">
+          <input type="text" id="status-content-id" placeholder="Paste your Content ID here" style="flex-grow: 1; background: #0f1117; border: 1px solid #3f3f46; border-radius: 8px; color: #e4e4e7; padding: 0.75rem;">
+          <button id="check-status-btn" onclick="checkStatus()">Check Status</button>
+        </div>
+      </div>
+      <div id="status-results" style="display: none; padding: 1rem; background: #18181b; border: 1px solid #27272a; border-radius: 8px;">
+        <p style="margin-bottom: 0.5rem; font-size: 0.85rem; color: #a1a1aa;"><strong>Status:</strong> <span id="status-state" style="color: #e4e4e7;"></span></p>
+        <p style="margin-bottom: 0.5rem; font-size: 0.85rem; color: #a1a1aa;"><strong>Attribution:</strong> <span id="status-attr" class="badge"></span></p>
+        <p id="status-note-container" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed #3f3f46; font-size: 0.85rem; color: #a1a1aa;">
+          <strong>Reviewer Note:</strong><br>
+          <span id="status-note" style="font-style: italic; color: #e4e4e7; margin-top: 0.5rem; display: inline-block;"></span>
+        </p>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -184,6 +219,7 @@
         const labelText = document.getElementById('label-text');
         const appealSection = document.getElementById('appeal-section');
         
+        document.getElementById('submission-id').innerText = data.content_id;
         resultsDiv.style.display = 'block';
         labelText.innerText = data.label;
         document.getElementById('confidence-score').innerText = (data.confidence !== null ? data.confidence.toFixed(3) : "None");
@@ -235,6 +271,44 @@
         alert("Error: " + e.message);
         btn.disabled = false;
         btn.innerText = "Submit Appeal";
+      }
+    }
+
+    async function checkStatus() {
+      const contentId = document.getElementById('status-content-id').value.trim();
+      const btn = document.getElementById('check-status-btn');
+      if (!contentId) return alert("Please enter a Content ID.");
+
+      btn.disabled = true;
+      btn.innerText = "Checking...";
+
+      try {
+        const response = await fetch('/api/appeal/' + contentId);
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error || "Failed to fetch status");
+
+        document.getElementById('status-results').style.display = 'block';
+        document.getElementById('status-state').innerText = data.status.replace('_', ' ');
+        
+        const attrEl = document.getElementById('status-attr');
+        attrEl.innerText = data.attribution.replace('_', ' ');
+        attrEl.className = 'badge ' + data.attribution;
+
+        const noteContainer = document.getElementById('status-note-container');
+        if (data.reviewer_note) {
+          noteContainer.style.display = 'block';
+          document.getElementById('status-note').innerText = '"' + data.reviewer_note + '"';
+        } else {
+          noteContainer.style.display = 'none';
+        }
+
+      } catch (e) {
+        alert("Error: " + e.message);
+        document.getElementById('status-results').style.display = 'none';
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Check Status";
       }
     }
   </script>

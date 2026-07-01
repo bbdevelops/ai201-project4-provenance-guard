@@ -17,7 +17,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from audit import get_dashboard_metrics, get_log, get_submission, init_db, update_status, write_entry
+from audit import get_dashboard_metrics, get_log, get_submission, init_db, update_status, write_entry, get_pending_appeals, resolve_appeal, get_appeal_details
 from labels import generate_label
 from scoring import score_confidence
 from signals.llm_signal import classify_with_llm
@@ -98,6 +98,7 @@ def submit():
             "llm_status": llm_status,
             "injection_suspected": injection_suspected,
             "status": "classified",
+            "text": text,
         }
     )
 
@@ -173,6 +174,61 @@ def log():
     return jsonify({"entries": get_log()})
 
 
+@app.route("/api/appeals/pending", methods=["GET"])
+def pending_appeals():
+    """Returns a list of all appeals currently 'under_review'."""
+    return jsonify({"appeals": get_pending_appeals()})
+
+
+@app.route("/api/appeals/resolve", methods=["POST"])
+def api_resolve_appeal():
+    """Resolves an appeal with a new attribution and reviewer note."""
+    data = request.get_json(silent=True) or {}
+    content_id = data.get("content_id")
+    new_attribution = data.get("new_attribution")
+    reviewer_note = data.get("reviewer_note")
+
+    if not content_id or not new_attribution or not reviewer_note:
+        return jsonify({"error": "Fields 'content_id', 'new_attribution', and 'reviewer_note' are required."}), 400
+
+    if new_attribution not in ["likely_human", "uncertain", "likely_ai"]:
+        return jsonify({"error": "Invalid attribution."}), 400
+
+    success = resolve_appeal(content_id, new_attribution, reviewer_note)
+    if not success:
+        return jsonify({"error": "Appeal not found or already resolved."}), 404
+
+    return jsonify({"success": True})
+
+
+@app.route("/api/appeal/<content_id>", methods=["GET"])
+def appeal_status(content_id):
+    """Returns the current status, attribution, and reviewer_note of a submission."""
+    # We can get the most recent log entry for this content_id to see its status
+    submission = get_submission(content_id)
+    if not submission:
+        return jsonify({"error": "Unknown content_id."}), 404
+        
+    import sqlite3
+    from config import DB_PATH
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        # Get the latest entry to determine current status
+        row = conn.execute(
+            "SELECT status, attribution, reviewer_note FROM audit_log WHERE content_id = ? ORDER BY id DESC LIMIT 1",
+            (content_id,)
+        ).fetchone()
+        
+    if not row:
+        return jsonify({"error": "No records found."}), 404
+        
+    return jsonify({
+        "status": row["status"],
+        "attribution": row["attribution"],
+        "reviewer_note": row["reviewer_note"]
+    })
+
+
 # ---------------------------------------------------------------------------
 # Analytics Dashboard & Dummy UI
 # ---------------------------------------------------------------------------
@@ -182,6 +238,15 @@ def dashboard():
     """Analytics dashboard — detection patterns, appeal rate, injection rate."""
     metrics = get_dashboard_metrics()
     return render_template("dashboard.html", **metrics)
+
+
+@app.route("/review/<content_id>")
+def review_appeal(content_id):
+    """Dedicated page for a site manager to review an appeal."""
+    appeal = get_appeal_details(content_id)
+    if not appeal:
+        return "Appeal not found", 404
+    return render_template("review.html", appeal=appeal)
 
 
 @app.route("/dashboard/metrics")

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review Appeal - Provenance Guard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f1117;
+      color: #e4e4e7;
+      min-height: 100vh;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: .25rem;
+      background: linear-gradient(135deg, #6366f1, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: #71717a;
+      font-size: .85rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #d4d4d8;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+    }
+
+    .info-item strong {
+      color: #a1a1aa;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+
+    .text-box {
+      background: #0f1117;
+      border: 1px solid #27272a;
+      padding: 1rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .reasoning-box {
+      border-left: 4px solid #818cf8;
+      padding-left: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+      font-style: italic;
+      color: #d4d4d8;
+    }
+
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 500;
+      color: #a1a1aa;
+      margin-bottom: .5rem;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      color: #e4e4e7;
+      padding: 0.75rem;
+      font-size: 1rem;
+    }
+
+    select:focus, input[type="text"]:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+
+    .actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    button {
+      background: #6366f1;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #4f46e5;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: .15rem .5rem;
+      border-radius: 6px;
+      font-size: .75rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge.likely_ai { background: #3b1520; color: #f87171; }
+    .badge.uncertain { background: #3b2f10; color: #fbbf24; }
+    .badge.likely_human { background: #103b20; color: #4ade80; }
+
+    a.back-link {
+      display: inline-block;
+      color: #a1a1aa;
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    a.back-link:hover {
+      color: #e4e4e7;
+      text-decoration: underline;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+    <h1>Review Appeal</h1>
+    <p class="subtitle">Review the submission text and the creator's reasoning to make a final determination.</p>
+
+    <div class="card">
+      <div class="info-grid">
+        <div class="info-item">
+          <strong>Content ID</strong>
+          {{ appeal.content_id }}
+        </div>
+        <div class="info-item">
+          <strong>Original Attribution</strong>
+          <span class="badge {{ appeal.attribution }}">{{ appeal.attribution.replace('_', ' ').title() }}</span>
+        </div>
+        <div class="info-item">
+          <strong>Scores (LLM / Stylo / Perplexity)</strong>
+          {{ "%.2f"|format(appeal.llm_score) if appeal.llm_score else '—' }} / 
+          {{ "%.2f"|format(appeal.stylo_score) if appeal.stylo_score else '—' }} /
+          {{ "%.2f"|format(appeal.perplexity_score) if appeal.perplexity_score else '—' }}
+        </div>
+        <div class="info-item">
+          <strong>Appeal Date</strong>
+          {{ appeal.appeal_time.replace('T', ' ').replace('Z', '') }}
+        </div>
+      </div>
+
+      <h2>Submitted Text</h2>
+      <div class="text-box">{{ appeal.text or 'No text recorded for this submission.' }}</div>
+
+      <h2>Creator's Reasoning</h2>
+      <div class="reasoning-box">"{{ appeal.appeal_reasoning or 'No reasoning provided.' }}"</div>
+
+      {% if appeal.status == 'resolved' %}
+      <div style="padding: 1rem; background: #103b20; border-left: 4px solid #4ade80; border-radius: 6px; margin-top: 2rem;">
+        <h3 style="color: #4ade80; font-size: 1rem; margin-bottom: 0.5rem;">Appeal Already Resolved</h3>
+        <p style="font-size: 0.85rem;">This appeal was resolved as <strong>{{ appeal.attribution.replace('_', ' ') }}</strong> with the following note:</p>
+        <p style="font-size: 0.85rem; font-style: italic; margin-top: 0.5rem;">"{{ appeal.reviewer_note }}"</p>
+      </div>
+      {% else %}
+      <hr style="border: none; border-top: 1px solid #27272a; margin: 2rem 0;">
+
+      <h2>Resolution</h2>
+      <div class="form-group">
+        <label for="resolve-attr">New Attribution</label>
+        <select id="resolve-attr">
+          <option value="likely_human" {% if appeal.attribution == 'likely_human' %}selected{% endif %}>Likely Human</option>
+          <option value="uncertain" {% if appeal.attribution == 'uncertain' %}selected{% endif %}>Uncertain</option>
+          <option value="likely_ai" {% if appeal.attribution == 'likely_ai' %}selected{% endif %}>Likely AI</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="resolve-note">Reviewer Note (Required)</label>
+        <input type="text" id="resolve-note" placeholder="e.g. Approved, reversed to human due to style match.">
+      </div>
+
+      <div class="actions">
+        <button onclick="submitResolution()">Resolve Appeal</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <script>
+    async function submitResolution() {
+      const attribution = document.getElementById('resolve-attr').value;
+      const note = document.getElementById('resolve-note').value;
+      
+      if (!note) {
+        alert("Please provide a reviewer note.");
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/appeals/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content_id: "{{ appeal.content_id }}",
+            new_attribution: attribution,
+            reviewer_note: note
+          })
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to resolve appeal.");
+        }
+
+        alert("Appeal resolved successfully!");
+        window.location.href = "/dashboard";
+
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  </script>
+</body>
+</html>
