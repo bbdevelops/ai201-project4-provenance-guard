@@ -26,8 +26,8 @@ ENABLE_PERPLEXITY_SIGNAL = (
 )
 PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_MODEL", "gpt2")  # GPT-2 Small
 
-# SQLite audit log lives next to the code, in the repo root.
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audit_log.db")
+# SQLite audit log lives next to the code, in the repo root, unless overridden.
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "audit_log.db"))
 
 
 def get_groq_client():
@@ -36,4 +36,4 @@ def get_groq_client():
         raise RuntimeError(
             "GROQ_API_KEY is not set. Add it to your .env file (see README)."
         )
-    return Groq(api_key=GROQ_API_KEY)
+    return Groq(api_key=GROQ_API_KEY, max_retries=2, timeout=10.0)

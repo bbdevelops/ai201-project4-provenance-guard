@@ -74,6 +74,17 @@ curl -s -X POST http://localhost:5000/appeal \
     | python -m json.tool
 ```
 
+### Running Tests
+
+The project includes an isolated, parameterized test suite using `pytest` that enforces the scoring constraints. Tests are located in the `tests/` directory.
+
+To run the suite, install the development dependencies and run `pytest`:
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/
+```
+
 ### Dummy Platform UI
 
 Alternatively, visit **http://localhost:5000/dummy** in your browser to submit text and file appeals interactively through a simulated creative writing platform interface.

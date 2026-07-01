@@ -45,8 +45,8 @@ MAX_TOKENS = 1024  # GPT-2's context window; longer inputs are truncated
 # Low perplexity (predictable) => AI-like => high score; high perplexity => human.
 # These endpoints are *reasoned, not fit to labeled ground truth* — documented as
 # such in the README. score = 1 - ramp(ppl, PPL_AI, PPL_HUMAN).
-PPL_AI = 25.0  # at/below this, fully AI-like -> score 1.0
-PPL_HUMAN = 100.0  # at/above this, fully human-like -> score 0.0
+PPL_AI = 20.0  # at/below this, fully AI-like -> score 1.0
+PPL_HUMAN = 65.0  # at/above this, fully human-like -> score 0.0
 
 # --- Lazy model cache (populated on first successful load) ---------------------
 _MODEL = None

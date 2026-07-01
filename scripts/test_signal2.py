@@ -74,6 +74,7 @@ CASES = {
 
 
 def main():
+    failures = 0
     for name, (text, content_type, note) in CASES.items():
         result = analyze_stylometrics(text, content_type)
         print(f"\n=== {name} ===  ({note})")
@@ -96,6 +97,26 @@ def main():
             print(f"    complex_ai = {metrics['complex_ai']}")
         else:
             print(f"  detail:       {metrics}")
+
+        # Enforce Diagnostic Constraints
+        if name == "clearly_ai":
+            if not (result["status"] == "success" and result["score"] >= 0.70):
+                print("  -> FAIL: Expected high score")
+                failures += 1
+        elif name == "clearly_human":
+            if not (result["status"] == "success" and result["score"] < 0.40):
+                print("  -> FAIL: Expected low score")
+                failures += 1
+        elif name == "degenerate_short":
+            if result["status"] != "parse_error":
+                print("  -> FAIL: Expected parse_error")
+                failures += 1
+
+    if failures:
+        print(f"\n{failures} tests failed.")
+        sys.exit(1)
+    else:
+        print("\nAll tests passed.")
 
 
 if __name__ == "__main__":

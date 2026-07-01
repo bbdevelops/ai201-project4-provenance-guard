@@ -13,6 +13,7 @@ M3 writes only ``event_type='classification'`` rows; ``stylo_score`` and
 """
 
 import sqlite3
+import time
 from datetime import datetime, timezone
 
 from config import DB_PATH
@@ -53,6 +54,7 @@ def _connect():
 def init_db():
     """Create the audit_log table if it does not exist. Idempotent."""
     with _connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -97,6 +99,22 @@ def now_iso():
     )
 
 
+def _execute_with_retry(query, params=(), max_retries=5, initial_backoff=0.05):
+    """Execute a query with exponential backoff on SQLite locking errors."""
+    backoff = initial_backoff
+    for attempt in range(max_retries):
+        try:
+            with _connect() as conn:
+                conn.execute(query, params)
+            return
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(backoff)
+                backoff *= 2
+            else:
+                raise
+
+
 def write_entry(entry):
     """Append one structured row. Missing keys default to None / sensible values.
 
@@ -112,10 +130,7 @@ def write_entry(entry):
     values = [entry.get(col) for col in _COLUMNS]
     placeholders = ", ".join("?" for _ in _COLUMNS)
     columns = ", ".join(_COLUMNS)
-    with _connect() as conn:
-        conn.execute(
-            f"INSERT INTO audit_log ({columns}) VALUES ({placeholders})", values
-        )
+    _execute_with_retry(f"INSERT INTO audit_log ({columns}) VALUES ({placeholders})", values)
 
 
 def get_log(limit=20):
@@ -145,11 +160,10 @@ def get_submission(content_id):
 
 def update_status(content_id, new_status):
     """Flip the status of every row for ``content_id`` (e.g. to under_review)."""
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE audit_log SET status = ? WHERE content_id = ?",
-            (new_status, content_id),
-        )
+    _execute_with_retry(
+        "UPDATE audit_log SET status = ? WHERE content_id = ?",
+        (new_status, content_id),
+    )
 
 
 def get_dashboard_metrics():
@@ -163,29 +177,25 @@ def get_dashboard_metrics():
     All rates default to 0.0 when the database is empty (no division-by-zero).
     """
     with _connect() as conn:
-        # 1. Detection pattern — classification counts by attribution.
-        rows = conn.execute(
-            "SELECT attribution, COUNT(*) AS cnt "
-            "FROM audit_log WHERE event_type = 'classification' "
-            "GROUP BY attribution"
-        ).fetchall()
-        counts = {row["attribution"]: row["cnt"] for row in rows}
-        likely_ai = counts.get("likely_ai", 0)
-        uncertain = counts.get("uncertain", 0)
-        likely_human = counts.get("likely_human", 0)
-        total_classifications = likely_ai + uncertain + likely_human
+        row = conn.execute(
+            """
+            SELECT 
+                SUM(CASE WHEN event_type = 'classification' THEN 1 ELSE 0 END) AS total_classifications,
+                SUM(CASE WHEN event_type = 'classification' AND attribution = 'likely_ai' THEN 1 ELSE 0 END) AS likely_ai_count,
+                SUM(CASE WHEN event_type = 'classification' AND attribution = 'uncertain' THEN 1 ELSE 0 END) AS uncertain_count,
+                SUM(CASE WHEN event_type = 'classification' AND attribution = 'likely_human' THEN 1 ELSE 0 END) AS likely_human_count,
+                SUM(CASE WHEN event_type = 'appeal' THEN 1 ELSE 0 END) AS total_appeals,
+                SUM(CASE WHEN event_type = 'classification' AND injection_suspected = 1 THEN 1 ELSE 0 END) AS total_injection_flagged
+            FROM audit_log
+            """
+        ).fetchone()
 
-        # 2. Appeal rate — appeal events / total classifications.
-        total_appeals = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM audit_log "
-            "WHERE event_type = 'appeal'"
-        ).fetchone()["cnt"]
-
-        # 3. Injection-flagged rate — flagged classifications / total.
-        total_injection_flagged = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM audit_log "
-            "WHERE event_type = 'classification' AND injection_suspected = 1"
-        ).fetchone()["cnt"]
+    total_classifications = row["total_classifications"] or 0
+    likely_ai = row["likely_ai_count"] or 0
+    uncertain = row["uncertain_count"] or 0
+    likely_human = row["likely_human_count"] or 0
+    total_appeals = row["total_appeals"] or 0
+    total_injection_flagged = row["total_injection_flagged"] or 0
 
     appeal_rate = (
         round(total_appeals / total_classifications, 4)

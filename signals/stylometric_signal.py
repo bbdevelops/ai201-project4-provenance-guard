@@ -66,12 +66,12 @@ W_BURST_SHORT, W_COMPLEX_SHORT, W_PUNCT_SHORT = 0.45, 0.35, 0.20
 # reducing false positives against genuine creators (planning.md §2).
 GENRE_PROFILES = {
     "prose": {
-        "burst": (2.0, 9.0),
+        "burst": (2.0, 10.0),
         "ttr": (0.45, 0.75),
-        "len": (12.0, 26.0),
-        "clause": (0.5, 2.0),
-        "punct_center": 0.13,
-        "punct_halfwidth": 0.10,
+        "len": (10.0, 15.0),
+        "clause": (1.0, 1.8),
+        "punct_center": 0.12,
+        "punct_halfwidth": 0.05,
     },
     "academic": {
         "burst": (1.0, 7.0),

@@ -83,6 +83,7 @@ def main():
         print("Set ENABLE_PERPLEXITY_SIGNAL=true and install "
               "requirements-ensemble.txt to run the real model.\n")
 
+    failures = 0
     for name, (text, note) in CASES.items():
         result = analyze_perplexity(text)
         print(f"=== {name} ===  ({note})")
@@ -96,6 +97,26 @@ def main():
         elif metrics:
             print(f"  detail: {metrics}")
         print()
+
+        if config.ENABLE_PERPLEXITY_SIGNAL:
+            if name == "clearly_ai":
+                if not (result["status"] == "success" and result["score"] >= 0.70):
+                    print("  -> FAIL: Expected high score")
+                    failures += 1
+            elif name == "clearly_human":
+                if not (result["status"] == "success" and result["score"] < 0.40):
+                    print("  -> FAIL: Expected low score")
+                    failures += 1
+            elif name == "degenerate_short":
+                if result["status"] != "parse_error":
+                    print("  -> FAIL: Expected parse_error")
+                    failures += 1
+
+    if failures:
+        print(f"\n{failures} tests failed.")
+        sys.exit(1)
+    else:
+        print("\nAll tests passed.")
 
 
 if __name__ == "__main__":
