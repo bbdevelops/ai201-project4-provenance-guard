@@ -142,6 +142,10 @@ confirmation. There is no automated re-classification — a human reviews it.
 | `/submit` | POST   | `{text, creator_id, content_type?}`  | `{content_id, attribution, confidence, signal_scores, label}`   |
 | `/appeal` | POST   | `{content_id, creator_reasoning}`    | `{content_id, status: "under_review", message}`                 |
 | `/log`    | GET    | —                                    | `{entries: [ ...recent structured audit entries... ]}`          |
+| `/api/appeals/pending` | GET | — | `{appeals: [ ...appeals currently under review... ]}` |
+| `/api/appeals/resolve` | POST | `{content_id, new_attribution, reviewer_note}` | `{success: true}` |
+| `/api/appeal/<content_id>` | GET | — | `{status, attribution, reviewer_note}` |
+| `/review/<content_id>` | GET | — | HTML Page (Dedicated Appeals Review UI) |
 
 `content_type` is an optional genre hint (`prose` default, `academic`, `poetry`) that
 routes the **structural** signal to a genre-specific baseline. It never relaxes the
@@ -452,9 +456,8 @@ done
   entry into the audit log **beside** the original classification — carrying the original
   attribution and both signal scores so a human reviewer sees full context — then returns
   a confirmation. **No automated re-classification.**
-- **What a reviewer sees:** an appeal queue of `under_review` items, each showing the
-  original attribution, the combined confidence, both individual signal scores, and the
-  creator's reasoning.
+- **How a reviewer resolves it:** Reviewers can monitor the main Audit Log on the dashboard. Pending appeals appear with a "Review ↗" link that opens a dedicated review page (`/review/<content_id>`). There, the reviewer can read the full submitted text alongside the creator's reasoning, select a new attribution, and provide a reviewer note to resolve the appeal.
+- **How creators check status:** Creators can enter their `content_id` into the "Check Submission Status" tool on the Dummy Platform (`/dummy`) to see live updates on their appeal's status, attribution, and the reviewer's note.
 
 **Real example (from the audit log).** A creator appealed a `likely_ai` verdict:
 
@@ -587,7 +590,7 @@ beside the original decision and the status flipped to `under_review`.
    raw TTR falls as text lengthens, making cross-length comparison unfair. I also had it
    add a short-text rule that drops the (unreliable) windowed TTR and reweights onto the
    stronger metrics below the window size ([signals/stylometric_signal.py](signals/stylometric_signal.py)).
-4. **GPT-2 perplexity signal + ensemble scorer.** I directed the AI to implement Signal
+5. **GPT-2 perplexity signal + ensemble scorer.** I directed the AI to implement Signal
    3 (GPT-2 perplexity) and extend the scorer for three-signal ensemble mode with
    conflict resolution. I reviewed the perplexity→score mapping endpoints (PPL 25→1.0,
    PPL 100→0.0) and the `DISAGREE_SPREAD=0.40` conflict-resolution cap, and added
@@ -595,7 +598,8 @@ beside the original decision and the status flipped to `under_review`.
    The test confirmed the signal works directionally (AI text scores higher than human
    text) and exposed the formal-text false-positive risk — which is exactly why the
    conflict rule exists.
-5. **Analytics Dashboard & Dummy Platform.** I directed the AI to extract the monolithic HTML dashboard string from `app.py` into separate templates in a `templates/` directory, implementing `render_template`. I then instructed it to build a Dummy Platform UI (`templates/dummy.html`) to interactively test submissions, and refine the dashboard into a professional 3-column layout displaying additional audit log data (Perplexity & Creator ID).
+6. **Analytics Dashboard & Dummy Platform.** I directed the AI to extract the monolithic HTML dashboard string from `app.py` into separate templates in a `templates/` directory, implementing `render_template`. I then instructed it to build a Dummy Platform UI (`templates/dummy.html`) to interactively test submissions, and refine the dashboard into a professional 3-column layout displaying additional audit log data (Perplexity & Creator ID).
+7. **Appeal Processing Feature.** I directed the AI to expand the appeals functionality. It altered the `audit.py` schema to capture the full `text` and `reviewer_note`, added REST endpoints for pending appeals and resolution, built a dedicated review page (`templates/review.html`) accessible via the dashboard's audit log, and updated the Dummy UI to give creators a tracking ID and a live status-check tool. It also isolated the review interface to a separate page to prevent the dashboard's auto-polling loop from wiping out reviewers' form inputs mid-keystroke.
 
 ---
 
@@ -612,8 +616,8 @@ documented in the relevant sections above.
   Optional dependencies in [requirements-ensemble.txt](requirements-ensemble.txt). See
   Detection Signals (Signal 3) and Confidence Scoring (ensemble mode) above.
 - **Analytics Dashboard & Dummy Platform — _status: ✅ implemented._** 
-  - **Dashboard (`GET /dashboard`)**: Serves an HTML page via `templates/dashboard.html` with a clean 3-column layout. It shows three metrics from the audit log: detection pattern (Chart.js doughnut), appeal rate, and injection-flagged rate (horizontal bars). It **live-updates** every 5 seconds via `GET /dashboard/metrics` (JS polling) and includes a **scrollable audit log table** showing recent entries with attribution badges, creator IDs, and all signal scores. Data aggregation in [audit.py](audit.py).
-  - **Dummy Platform (`GET /dummy`)**: Serves a simulated writing platform UI via `templates/dummy.html` that allows users to test the submission and appeal APIs directly in the browser.
+  - **Dashboard (`GET /dashboard`)**: Serves an HTML page via `templates/dashboard.html` with a clean 3-column layout. It shows three metrics from the audit log: detection pattern (Chart.js doughnut), appeal rate, and injection-flagged rate (horizontal bars). It **live-updates** every 5 seconds via `GET /dashboard/metrics` (JS polling) and includes a **scrollable audit log table** showing recent entries with attribution badges, creator IDs, and all signal scores. Pending appeals contain a direct link to a dedicated Review Page (`/review/<content_id>`).
+  - **Dummy Platform (`GET /dummy`)**: Serves a simulated writing platform UI via `templates/dummy.html` that allows users to test the submission and appeal APIs directly in the browser, complete with a "Check Submission Status" tool for tracking appeals.
 - **Provenance Certificate — _status: planned._** A "verified human" credential a creator
   earns through an extra verification step, displayed distinctly from the standard label.
 ---
@@ -624,3 +628,6 @@ A short portfolio walkthrough video accompanies this submission, giving a quick 
 the system working end-to-end. The detailed evidence — audit-log sample, rate-limit
 behavior, label variants, and appeal handling — lives in this README and the committed
 source code.
+
+**Portfolio Walkthrough Video:**
+https://vimeo.com/1206021435
